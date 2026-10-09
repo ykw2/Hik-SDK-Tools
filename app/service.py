@@ -19,7 +19,22 @@ from app.store import EventStore
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 
-REARM_TYPES = {0x8000, 0x8003, 0x8017}
+# 0x8000 登入心跳逾時，0x8002 報警通道異常，0x8044 重登失敗
+OFFLINE_TYPES = {0x8000, 0x8002, 0x8044}
+# 0x8006 報警通道重連，0x8040 正在重登
+RECONNECT_TYPES = {0x8006, 0x8040}
+REARM_TYPES = OFFLINE_TYPES | {0x8006}
+PROBE_SECONDS = 15
+
+
+def online_from_exception(typ: int) -> str | None:
+    if typ in OFFLINE_TYPES:
+        return "offline"
+    if typ in RECONNECT_TYPES:
+        return "reconnecting"
+    if typ == 0x8041:
+        return "online"
+    return None
 
 
 def now_text() -> str:
@@ -68,13 +83,16 @@ class Hub:
         self._queue: queue.Queue = queue.Queue(maxsize=2000)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._probe_thread: threading.Thread | None = None
         self.last_command = ""
         self._rearm_at: dict[str, float] = {}
 
     def start(self):
         self.sdk.init(self.sdk_path, self.data_dir / "sdklog")
         self._thread = threading.Thread(target=self._loop, name="plate-worker", daemon=True)
+        self._probe_thread = threading.Thread(target=self._probe_loop, name="online-probe", daemon=True)
         self._thread.start()
+        self._probe_thread.start()
         for camera in self.config.cameras():
             if camera.get("autoArm"):
                 try:
@@ -93,11 +111,13 @@ class Hub:
 
     def status(self) -> dict:
         armed = sum(1 for item in self.sessions.values() if item.get("status") == "armed")
+        online = sum(1 for item in self.sessions.values() if item.get("online") == "online")
         return {
             "sdkLoaded": self.sdk.loaded,
             "sdkError": self.sdk.error,
             "sdkPath": str(self.sdk_path),
             "armed": armed,
+            "online": online,
             "lastCommand": self.last_command,
             "layouts": [
                 {"name": item["name"], "pack": item["pack"], "size": item["size"]}
@@ -147,6 +167,8 @@ class Hub:
                 raise RuntimeError(message)
             self.sessions[camera_id] = {
                 "status": "armed",
+                "online": "online",
+                "checkedAt": now_text(),
                 "error": "",
                 "userId": user_id,
                 "handle": handle,
@@ -218,6 +240,8 @@ class Hub:
             "username": camera["username"],
             "autoArm": bool(camera.get("autoArm")),
             "status": session.get("status", "idle"),
+            "online": session.get("online", "unknown"),
+            "checkedAt": session.get("checkedAt", ""),
             "error": session.get("error", ""),
         }
 
@@ -240,10 +264,10 @@ class Hub:
             log.warning("車牌佇列已滿，丟棄一筆")
 
     def _on_exception(self, typ: int, user_id: int):
-        if typ not in REARM_TYPES:
+        if online_from_exception(typ) is None and typ not in REARM_TYPES:
             return
         try:
-            self._queue.put_nowait(("rearm", user_id))
+            self._queue.put_nowait(("exception", (typ, user_id)))
         except queue.Full:
             pass
 
@@ -256,10 +280,61 @@ class Hub:
             try:
                 if kind == "alarm":
                     self._handle_alarm(payload)
-                elif kind == "rearm":
-                    self._rearm(payload)
+                elif kind == "exception":
+                    typ, user_id = payload
+                    self._apply_exception(typ, user_id)
+                    if typ in REARM_TYPES:
+                        self._rearm(user_id)
             except Exception:
                 log.exception("處理佇列失敗")
+
+    def _apply_exception(self, typ: int, user_id: int):
+        online = online_from_exception(typ)
+        if online is None:
+            return
+        camera_id = self._by_user.get(int(user_id))
+        if not camera_id:
+            return
+        with self._lock:
+            session = self.sessions.get(camera_id)
+            if not session or session.get("userId") != int(user_id):
+                return
+            session["online"] = online
+            session["checkedAt"] = now_text()
+        log.info("鏡頭 %s 上線狀態改為 %s（異常 0x%04X）", camera_id, online, typ)
+
+    def _probe_loop(self):
+        while not self._stop.wait(PROBE_SECONDS):
+            try:
+                self._probe_sessions()
+            except Exception:
+                log.exception("探測鏡頭連線失敗")
+
+    def _probe_sessions(self):
+        if not self.sdk.loaded:
+            return
+        targets = []
+        with self._lock:
+            for camera_id, session in self.sessions.items():
+                user_id = session.get("userId", -1)
+                if session.get("status") == "armed" and user_id >= 0:
+                    targets.append((camera_id, int(user_id)))
+        for camera_id, user_id in targets:
+            alive = self.sdk.session_alive(user_id)
+            if alive is None:
+                continue
+            online = "online" if alive else "offline"
+            with self._lock:
+                session = self.sessions.get(camera_id)
+                if not session or session.get("userId") != user_id:
+                    continue
+                changed = session.get("online") != online
+                session["online"] = online
+                session["checkedAt"] = now_text()
+            if changed:
+                log.info("鏡頭 %s 上線狀態改為 %s", camera_id, online)
+            if not alive:
+                self._rearm(user_id)
 
     def _handle_alarm(self, payload: dict):
         if payload.get("commandOnly"):

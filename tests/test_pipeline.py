@@ -153,6 +153,42 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(page.status_code, 200)
             self.assertIn("卡口車牌", page.text)
             self.assertIn("發布規則", page.text)
+            self.assertIn("上線", page.text)
+
+
+class OnlineTests(unittest.TestCase):
+    def test_heartbeat_exception_marks_offline(self):
+        from app.service import Hub, online_from_exception
+
+        self.assertEqual(online_from_exception(0x8000), "offline")
+        self.assertEqual(online_from_exception(0x8006), "reconnecting")
+        self.assertEqual(online_from_exception(0x8041), "online")
+        self.assertIsNone(online_from_exception(0x8003))
+        os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="hik-online-")
+        hub = Hub()
+        saved = hub.config.upsert_camera(
+            {
+                "name": "卡口",
+                "host": "10.0.0.8",
+                "port": 8000,
+                "username": "admin",
+                "password": "x",
+            }
+        )
+        hub.sessions[saved["id"]] = {
+            "status": "armed",
+            "online": "online",
+            "checkedAt": "2026-10-09T09:00:00",
+            "error": "",
+            "userId": 3,
+            "handle": 1,
+        }
+        hub._by_user[3] = saved["id"]
+        hub._apply_exception(0x8000, 3)
+        view = hub.cameras()[0]
+        self.assertEqual(view["status"], "armed")
+        self.assertEqual(view["online"], "offline")
+        self.assertNotEqual(view["checkedAt"], "2026-10-09T09:00:00")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 14px;
+      overflow-x: auto;
     }
     label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
     input, textarea, select {
@@ -74,6 +75,7 @@
     textarea { min-height: 180px; font-family: Consolas, "Microsoft JhengHei", monospace; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    #panel-cameras th, #panel-cameras td { white-space: nowrap; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; }
     .ok { color: var(--ok); }
     .bad { color: var(--bad); }
@@ -150,7 +152,7 @@
       </form>
       <div class="card">
         <table>
-          <thead><tr><th>名稱</th><th>位址</th><th>狀態</th><th></th></tr></thead>
+          <thead><tr><th>名稱</th><th>位址</th><th>布防</th><th>上線</th><th></th></tr></thead>
           <tbody id="camera-list"></tbody>
         </table>
       </div>
@@ -252,13 +254,27 @@
       if (cam.status === "error") return cam.error || "失敗";
       return "未布防";
     }
+    function onlineText(cam) {
+      if (cam.status !== "armed") return "未連線";
+      if (cam.online === "online") return "在線";
+      if (cam.online === "offline") return "離線";
+      if (cam.online === "reconnecting") return "重連中";
+      return "確認中";
+    }
+    function onlineClass(cam) {
+      if (cam.status !== "armed") return "";
+      if (cam.online === "online") return "ok";
+      if (cam.online === "offline") return "bad";
+      if (cam.online === "reconnecting") return "warn";
+      return "";
+    }
     function renderCameras() {
       const body = document.getElementById("camera-list");
       body.replaceChildren();
       if (!state.cameras.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 4;
+        td.colSpan = 5;
         td.textContent = "還沒有鏡頭";
         tr.appendChild(td);
         body.appendChild(tr);
@@ -277,6 +293,18 @@
           if (index === 2) td.className = cam.status === "armed" ? "ok" : cam.status === "error" ? "bad" : "";
           tr.appendChild(td);
         });
+        const online = document.createElement("td");
+        online.className = onlineClass(cam);
+        const label = document.createElement("div");
+        label.textContent = onlineText(cam);
+        online.appendChild(label);
+        if (cam.status === "armed" && cam.checkedAt) {
+          const when = document.createElement("div");
+          when.className = "hint";
+          when.textContent = String(cam.checkedAt).slice(11, 19);
+          online.appendChild(when);
+        }
+        tr.appendChild(online);
         const ops = document.createElement("td");
         const edit = document.createElement("button");
         edit.type = "button";
@@ -453,7 +481,7 @@
       ]);
       const sdk = document.getElementById("sdk-status");
       sdk.textContent = status.sdkLoaded
-        ? "SDK 已載入 · 布防 " + status.armed + " 支" + (status.lastCommand ? " · 最近報警 " + status.lastCommand : "")
+        ? "SDK 已載入 · 布防 " + status.armed + " 支 · 在線 " + (status.online || 0) + " 支" + (status.lastCommand ? " · 最近報警 " + status.lastCommand : "")
         : "SDK 未載入：" + (status.sdkError || "把 SDK 放到 sdk 資料夾");
       sdk.className = status.sdkLoaded ? "ok" : "warn";
       state.cameras = cameras;

@@ -54,6 +54,7 @@ class SdkClient:
         self._msg_cb = None
         self._ex_cb = None
         self._kept = []
+        self._probe_bound = False
 
     def init(self, sdk_path: Path, log_dir: Path | None = None):
         sdk_path = Path(sdk_path)
@@ -93,15 +94,56 @@ class SdkClient:
                 log.exception("SDK cleanup")
         self.loaded = False
 
+    def last_error_code(self) -> int:
+        if not self.lib:
+            return -1
+        try:
+            return int(self.lib.NET_DVR_GetLastError())
+        except Exception:
+            return -1
+
     def last_error(self) -> str:
         if not self.lib:
             return self.error or "SDK 未載入"
-        try:
-            code = int(self.lib.NET_DVR_GetLastError())
-        except Exception:
+        code = self.last_error_code()
+        if code < 0:
             return "無法取得錯誤碼"
         text = ERRORS.get(code, "錯誤")
         return f"{text}（{code}）"
+
+    def session_alive(self, user_id: int) -> bool | None:
+        """登入連線是否還在。None 表示這次查詢不能下結論。"""
+        lib = self.lib
+        if not lib or not self.loaded or user_id < 0 or not hasattr(lib, "NET_DVR_GetDVRConfig"):
+            return None
+        if not self._probe_bound:
+            lib.NET_DVR_GetDVRConfig.argtypes = [
+                c_int32,
+                c_uint32,
+                c_int32,
+                c_void_p,
+                c_uint32,
+                ctypes.POINTER(c_uint32),
+            ]
+            lib.NET_DVR_GetDVRConfig.restype = c_int32
+            self._probe_bound = True
+        buffer = ctypes.create_string_buffer(1024)
+        returned = c_uint32(0)
+        try:
+            ok = lib.NET_DVR_GetDVRConfig(
+                int(user_id), 100, 0, ctypes.addressof(buffer), 1024, ctypes.byref(returned)
+            )
+        except Exception:
+            log.exception("查詢鏡頭連線失敗")
+            return None
+        if ok:
+            return True
+        code = self.last_error_code()
+        if code in (7, 10, 11):
+            return False
+        if code in (17, 23):
+            return True
+        return None
 
     def login(self, host: str, port: int, username: str, password: str) -> int:
         structs = get_structs(1 if os.name == "nt" else 4)
