@@ -1,0 +1,14 @@
+把海康「設備網路 SDK」Linux 64 位元版解壓後，以下檔案放進這個 sdk 資料夾（與本說明同一層）：
+
+libhcnetsdk.so
+libHCCore.so
+libhpr.so
+libcrypto.so.1.1
+libssl.so.1.1
+HCNetSDKCom\          （整個目錄，裡面是 libHCAlarm.so 等）
+
+Windows 本機直接跑（不經 Docker）則改放：
+HCNetSDK.dll
+HCNetSDKCom\
+
+這些檔案有授權限制，不要提交進 git。

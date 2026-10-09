@@ -1,0 +1,14 @@
+services:
+  hik-gate:
+    build: .
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./sdk:/opt/hiksdk
+      - ./data:/app/data
+    environment:
+      HIKSDK_PATH: /opt/hiksdk
+      DATA_DIR: /app/data
+      APP_PORT: "8123"
+      LD_LIBRARY_PATH: /opt/hiksdk
+    restart: unless-stopped

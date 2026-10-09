@@ -1,0 +1,7 @@
+.git
+data
+sdk
+**/__pycache__
+.venv
+venv
+*.pyc

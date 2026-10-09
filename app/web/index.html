@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>卡口車牌</title>
+  <style>
+    :root {
+      --ink: #1c2430;
+      --muted: #5c6b7a;
+      --line: #d5dbe3;
+      --paper: #f3f5f7;
+      --card: #fff;
+      --accent: #0c6b4d;
+      --accent-ink: #fff;
+      --warn: #8a3d12;
+      --bad: #8d2b2b;
+      --ok: #0c6b4d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      padding: 20px 24px 12px;
+    }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    #sdk-status { font-size: 13px; text-align: right; }
+    nav { display: flex; gap: 8px; padding: 0 24px 12px; flex-wrap: wrap; }
+    nav button, .row button, .actions button {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font: inherit;
+      white-space: nowrap;
+    }
+    nav button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .actions button.primary, #cam-save, #rule-save {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+    main { padding: 0 24px 32px; }
+    .panel { display: none; }
+    .panel.active { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+    #panel-events.active, #panel-logs.active { grid-template-columns: 1fr; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+      color: var(--ink);
+      background: #fff;
+    }
+    textarea { min-height: 180px; font-family: Consolas, "Microsoft JhengHei", monospace; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    .ok { color: var(--ok); }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .plate { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
+    .detail { display: grid; grid-template-columns: 220px 1fr; gap: 12px; margin-top: 12px; }
+    img.shot { width: 100%; background: #eef1f4; border-radius: 6px; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      background: #f7f8fa;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    #log-list pre { max-width: 100%; max-height: 240px; overflow: auto; }
+    .tag { font-size: 12px; font-weight: 500; color: var(--warn); margin-left: 6px; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    #toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      background: var(--ink);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      display: none;
+      max-width: 360px;
+    }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 14px; color: var(--ink); }
+    .check input { width: auto; }
+    @media (max-width: 900px) {
+      .panel.active, .detail { grid-template-columns: 1fr; }
+      header { flex-direction: column; align-items: flex-start; }
+      #sdk-status { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>卡口車牌</h1>
+      <div class="sub">布防收出入口結果。本頁顯示原始資料，發布出去的是改過的 JSON。</div>
+    </div>
+    <div id="sdk-status">正在檢查 SDK…</div>
+  </header>
+  <nav>
+    <button id="tab-cameras" class="active" type="button">鏡頭</button>
+    <button id="tab-events" type="button">過車結果</button>
+    <button id="tab-rules" type="button">發布規則</button>
+    <button id="tab-logs" type="button">轉發紀錄</button>
+  </nav>
+  <main>
+    <section id="panel-cameras" class="panel active">
+      <form id="camera-form" class="card">
+        <strong>鏡頭</strong>
+        <input id="cam-id" type="hidden">
+        <label for="cam-name">名稱</label>
+        <input id="cam-name" placeholder="入口1">
+        <label for="cam-host">IP</label>
+        <input id="cam-host" placeholder="192.168.1.64" required>
+        <label for="cam-port">SDK 埠</label>
+        <input id="cam-port" type="number" value="8000">
+        <label for="cam-user">帳號</label>
+        <input id="cam-user" value="admin">
+        <label for="cam-pass">密碼</label>
+        <input id="cam-pass" type="password" placeholder="留空表示不改">
+        <label class="check"><input id="cam-auto" type="checkbox"> 程式啟動時自動布防</label>
+        <div class="actions" style="margin-top:12px;display:flex;gap:8px;">
+          <button id="cam-save" class="primary" type="submit">儲存</button>
+          <button id="cam-reset" type="button">清空</button>
+        </div>
+      </form>
+      <div class="card">
+        <table>
+          <thead><tr><th>名稱</th><th>位址</th><th>狀態</th><th></th></tr></thead>
+          <tbody id="camera-list"></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="panel-events" class="panel">
+      <div class="card">
+        <div class="actions" style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>最近過車</strong>
+          <button id="btn-simulate" type="button">模擬一筆</button>
+        </div>
+        <table>
+          <thead><tr><th>時間</th><th>鏡頭</th><th>車牌</th><th>車道</th><th>方向</th><th>車型</th></tr></thead>
+          <tbody id="event-list"></tbody>
+        </table>
+        <div id="event-detail"></div>
+      </div>
+    </section>
+    <section id="panel-rules" class="panel">
+      <form id="rule-form" class="card">
+        <strong>發布規則</strong>
+        <input id="rule-id" type="hidden">
+        <label for="rule-name">名稱</label>
+        <input id="rule-name" placeholder="停車場系統">
+        <label for="rule-url">HTTP 位址</label>
+        <input id="rule-url" placeholder="http://10.0.0.8/api/plate">
+        <label for="rule-method">方法</label>
+        <select id="rule-method"><option>POST</option><option>PUT</option></select>
+        <label class="check"><input id="rule-enabled" type="checkbox" checked> 啟用</label>
+        <label for="rule-headers">Header JSON</label>
+        <textarea id="rule-headers" style="min-height:70px;">{}</textarea>
+        <label for="rule-template">送出的 JSON。{{欄位}} 會換成這筆車牌</label>
+        <textarea id="rule-template"></textarea>
+        <p class="hint" id="field-hint"></p>
+        <div class="actions" style="display:flex;gap:8px;">
+          <button id="rule-save" class="primary" type="submit">儲存</button>
+          <button id="rule-example" type="button">填入範例</button>
+          <button id="rule-test" type="button">用最近一筆測試</button>
+        </div>
+      </form>
+      <div class="card">
+        <table>
+          <thead><tr><th>名稱</th><th>位址</th><th>狀態</th><th></th></tr></thead>
+          <tbody id="rule-list"></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="panel-logs" class="panel">
+      <div class="card">
+        <table>
+          <thead><tr><th>時間</th><th>規則</th><th>車牌</th><th>結果</th></tr></thead>
+          <tbody id="log-list"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    const FIELDS = ["time","plate","plateRaw","plateColor","plateType","confidence","lane","direction","carDirection","vehicleType","vehicleColor","speed","detectType","device","cameraName","monitoringSite","deviceNo","sceneImage","plateImage"];
+    const EXAMPLE = {
+      license: "{{plate}}",
+      color: "{{plateColor}}",
+      gate: "入口1",
+      laneNo: "{{lane}}",
+      direction: "{{direction}}",
+      passTime: "{{time}}",
+      vehicle: "{{vehicleType}}",
+      device: "{{device}}"
+    };
+    const state = { events: [], rules: [], cameras: [] };
+    document.getElementById("field-hint").textContent = "可用欄位：" + FIELDS.join("、");
+    document.getElementById("rule-template").value = JSON.stringify(EXAMPLE, null, 2);
+
+    function toast(text) {
+      const el = document.getElementById("toast");
+      el.textContent = text;
+      el.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { el.style.display = "none"; }, 3200);
+    }
+    async function api(url, options) {
+      const res = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, options));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+    function show(name) {
+      for (const id of ["cameras", "events", "rules", "logs"]) {
+        document.getElementById("panel-" + id).classList.toggle("active", id === name);
+        document.getElementById("tab-" + id).classList.toggle("active", id === name);
+      }
+    }
+    document.getElementById("tab-cameras").onclick = () => show("cameras");
+    document.getElementById("tab-events").onclick = () => show("events");
+    document.getElementById("tab-rules").onclick = () => show("rules");
+    document.getElementById("tab-logs").onclick = () => show("logs");
+
+    function statusText(cam) {
+      if (cam.status === "armed") return "已布防";
+      if (cam.status === "error") return cam.error || "失敗";
+      return "未布防";
+    }
+    function renderCameras() {
+      const body = document.getElementById("camera-list");
+      body.replaceChildren();
+      if (!state.cameras.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.textContent = "還沒有鏡頭";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+      for (const cam of state.cameras) {
+        const tr = document.createElement("tr");
+        const cells = [
+          cam.name,
+          cam.host + ":" + cam.port,
+          statusText(cam)
+        ];
+        cells.forEach((text, index) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          if (index === 2) td.className = cam.status === "armed" ? "ok" : cam.status === "error" ? "bad" : "";
+          tr.appendChild(td);
+        });
+        const ops = document.createElement("td");
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "編輯";
+        edit.onclick = () => {
+          document.getElementById("cam-id").value = cam.id;
+          document.getElementById("cam-name").value = cam.name;
+          document.getElementById("cam-host").value = cam.host;
+          document.getElementById("cam-port").value = cam.port;
+          document.getElementById("cam-user").value = cam.username;
+          document.getElementById("cam-pass").value = "";
+          document.getElementById("cam-auto").checked = !!cam.autoArm;
+        };
+        const arm = document.createElement("button");
+        arm.type = "button";
+        arm.textContent = cam.status === "armed" ? "撤防" : "布防";
+        arm.onclick = async () => {
+          try {
+            if (cam.status === "armed") await api("/api/cameras/" + cam.id + "/disarm", { method: "POST" });
+            else await api("/api/cameras/" + cam.id + "/arm", { method: "POST" });
+            toast(cam.status === "armed" ? "已撤防" : "已布防");
+            refresh();
+          } catch (err) { toast(err.message); }
+        };
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "刪除";
+        del.onclick = async () => {
+          if (!confirm("刪除這支鏡頭？")) return;
+          await api("/api/cameras/" + cam.id, { method: "DELETE" });
+          refresh();
+        };
+        ops.append(edit, arm, del);
+        tr.appendChild(ops);
+        body.appendChild(tr);
+      }
+    }
+    function renderEvents() {
+      const body = document.getElementById("event-list");
+      body.replaceChildren();
+      if (!state.events.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.textContent = "還沒有過車。布防之後，車過閘口就會出現在這裡。";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+      for (const ev of state.events) {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        [ev.time, ev.cameraName || ev.device, ev.plate, ev.lane, ev.direction, ev.vehicleType].forEach((text, index) => {
+          const td = document.createElement("td");
+          td.textContent = text ?? "";
+          if (index === 2) {
+            td.className = "plate";
+            if (ev.simulated) {
+              const tag = document.createElement("span");
+              tag.className = "tag";
+              tag.textContent = "模擬";
+              td.appendChild(tag);
+            }
+          }
+          tr.appendChild(td);
+        });
+        tr.onclick = () => showEvent(ev);
+        body.appendChild(tr);
+      }
+    }
+    function showEvent(ev) {
+      const box = document.getElementById("event-detail");
+      box.replaceChildren();
+      const wrap = document.createElement("div");
+      wrap.className = "detail";
+      const pics = document.createElement("div");
+      for (const [name, label] of [[ev.sceneImage, "場景"], [ev.plateImage, "車牌圖"]]) {
+        if (!name) continue;
+        const p = document.createElement("div");
+        p.textContent = label;
+        const img = document.createElement("img");
+        img.className = "shot";
+        img.alt = label;
+        img.src = "/api/shots/" + name;
+        pics.append(p, img);
+      }
+      const pre = document.createElement("pre");
+      const copy = Object.assign({}, ev);
+      pre.textContent = JSON.stringify(copy, null, 2);
+      wrap.append(pics, pre);
+      if (ev.parseWarning) {
+        const warn = document.createElement("p");
+        warn.className = "warn";
+        warn.textContent = ev.parseWarning;
+        box.appendChild(warn);
+      }
+      box.appendChild(wrap);
+    }
+    function renderRules() {
+      const body = document.getElementById("rule-list");
+      body.replaceChildren();
+      for (const rule of state.rules) {
+        const tr = document.createElement("tr");
+        [rule.name, rule.url, rule.enabled ? "啟用" : "停用"].forEach((text, index) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          if (index === 2) td.className = rule.enabled ? "ok" : "warn";
+          tr.appendChild(td);
+        });
+        const ops = document.createElement("td");
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "編輯";
+        edit.onclick = () => {
+          document.getElementById("rule-id").value = rule.id;
+          document.getElementById("rule-name").value = rule.name;
+          document.getElementById("rule-url").value = rule.url;
+          document.getElementById("rule-method").value = rule.method || "POST";
+          document.getElementById("rule-enabled").checked = !!rule.enabled;
+          document.getElementById("rule-headers").value = JSON.stringify(rule.headers || {}, null, 2);
+          document.getElementById("rule-template").value = JSON.stringify(rule.template || {}, null, 2);
+        };
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "刪除";
+        del.onclick = async () => {
+          await api("/api/rules/" + rule.id, { method: "DELETE" });
+          refresh();
+        };
+        ops.append(edit, del);
+        tr.appendChild(ops);
+        body.appendChild(tr);
+      }
+    }
+    function renderLogs(logs) {
+      const body = document.getElementById("log-list");
+      body.replaceChildren();
+      if (!logs.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.textContent = "還沒有轉發紀錄";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+      for (const item of logs) {
+        const tr = document.createElement("tr");
+        const result = item.ok ? "成功 " + item.status : (item.error || "失敗");
+        [item.time, item.ruleName, item.plate, result].forEach((text, index) => {
+          const td = document.createElement("td");
+          td.textContent = text ?? "";
+          if (index === 3) td.className = item.ok ? "ok" : "bad";
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+        const extra = document.createElement("tr");
+        const bodyCell = document.createElement("td");
+        bodyCell.colSpan = 4;
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(item.body || {}, null, 2);
+        bodyCell.appendChild(pre);
+        extra.appendChild(bodyCell);
+        body.appendChild(extra);
+      }
+    }
+    async function refresh() {
+      const [status, cameras, events, rules, logs] = await Promise.all([
+        api("/api/status"),
+        api("/api/cameras"),
+        api("/api/events?limit=50"),
+        api("/api/rules"),
+        api("/api/forward-logs?limit=50")
+      ]);
+      const sdk = document.getElementById("sdk-status");
+      sdk.textContent = status.sdkLoaded
+        ? "SDK 已載入 · 布防 " + status.armed + " 支" + (status.lastCommand ? " · 最近報警 " + status.lastCommand : "")
+        : "SDK 未載入：" + (status.sdkError || "把 SDK 放到 sdk 資料夾");
+      sdk.className = status.sdkLoaded ? "ok" : "warn";
+      state.cameras = cameras;
+      state.events = events;
+      state.rules = rules;
+      renderCameras();
+      renderEvents();
+      renderRules();
+      renderLogs(logs);
+    }
+    document.getElementById("camera-form").onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        await api("/api/cameras", {
+          method: "POST",
+          body: JSON.stringify({
+            id: document.getElementById("cam-id").value,
+            name: document.getElementById("cam-name").value,
+            host: document.getElementById("cam-host").value,
+            port: Number(document.getElementById("cam-port").value || 8000),
+            username: document.getElementById("cam-user").value,
+            password: document.getElementById("cam-pass").value,
+            autoArm: document.getElementById("cam-auto").checked
+          })
+        });
+        toast("鏡頭已儲存");
+        document.getElementById("camera-form").reset();
+        document.getElementById("cam-port").value = 8000;
+        document.getElementById("cam-user").value = "admin";
+        refresh();
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("cam-reset").onclick = () => {
+      document.getElementById("camera-form").reset();
+      document.getElementById("cam-port").value = 8000;
+      document.getElementById("cam-user").value = "admin";
+    };
+    document.getElementById("rule-example").onclick = () => {
+      document.getElementById("rule-template").value = JSON.stringify(EXAMPLE, null, 2);
+    };
+    document.getElementById("rule-form").onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const saved = await api("/api/rules", {
+          method: "POST",
+          body: JSON.stringify({
+            id: document.getElementById("rule-id").value,
+            name: document.getElementById("rule-name").value,
+            url: document.getElementById("rule-url").value,
+            method: document.getElementById("rule-method").value,
+            enabled: document.getElementById("rule-enabled").checked,
+            headers: document.getElementById("rule-headers").value,
+            template: document.getElementById("rule-template").value
+          })
+        });
+        document.getElementById("rule-id").value = saved.id;
+        toast("規則已儲存");
+        refresh();
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("rule-test").onclick = async () => {
+      const id = document.getElementById("rule-id").value;
+      if (!id) { toast("先儲存規則，或在右邊按編輯"); return; }
+      try {
+        const result = await api("/api/rules/" + id + "/test", { method: "POST" });
+        toast(result.ok ? "已送到 " + result.status : result.error);
+        show("logs");
+        refresh();
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("btn-simulate").onclick = async () => {
+      try {
+        const ev = await api("/api/simulate", { method: "POST", body: JSON.stringify({ plate: "粵B12345", lane: 1 }) });
+        toast("已模擬 " + ev.plate);
+        refresh();
+        showEvent(ev);
+      } catch (err) { toast(err.message); }
+    };
+    refresh();
+    setInterval(refresh, 1500);
+  </script>
+</body>
+</html>

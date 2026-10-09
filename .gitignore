@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/*
+!data/.gitkeep
+sdk/*
+!sdk/.gitkeep
+!sdk/請把SDK放這裡.txt
+*.log
