@@ -390,3 +390,58 @@ def parse_alarm(command: int, address: int, buf_len: int) -> dict | None:
         )
     best.pop("score", None)
     return best
+
+
+ALARM_V30_TYPES = {
+    0: "信號量",
+    1: "硬碟滿",
+    2: "信號遺失",
+    3: "移動偵測",
+    4: "硬碟未格式化",
+    5: "讀寫硬碟出錯",
+    6: "遮擋",
+    7: "制式不符",
+    8: "非法訪問",
+    9: "視頻信號異常",
+    10: "錄像異常",
+    11: "智能場景變化",
+    12: "陣列異常",
+    13: "解析度不符",
+}
+
+
+def _read_text(address: int, size: int) -> str:
+    if size <= 0:
+        return ""
+    raw = ctypes.string_at(address, size).split(b"\x00", 1)[0]
+    text = raw.decode("gbk", errors="ignore").strip()
+    if not text or "\ufffd" in text or any(ord(ch) < 32 for ch in text):
+        return ""
+    return text
+
+
+def summarize_command(command: int, address: int, buf_len: int) -> dict:
+    """在回調裡抄出可顯示的欄位。不保留 SDK 指標。"""
+    if not address or buf_len < 8:
+        return {}
+    try:
+        if command == 0x4000:
+            kind = int(c_uint32.from_address(address).value)
+            number = int(c_uint32.from_address(address + 4).value)
+            return {"報警類型": ALARM_V30_TYPES.get(kind, str(kind)), "輸入號": number}
+        if command == 0x3058:
+            index = int(c_uint32.from_address(address + 4).value)
+            detail = {"資料序號": index}
+            size = int(c_uint32.from_address(address).value)
+            take = min(32, max(0, size - 8), max(0, buf_len - 8))
+            operate = _read_text(address + 8, take)
+            if operate:
+                detail["操作編號"] = operate
+            return detail
+        if command == 0x3059:
+            plate = clean_plate(_read_text(address + 8, min(16, buf_len - 8)))
+            if plate_score(plate, 0) >= 15:
+                return {"車牌": plate}
+    except (ValueError, OSError):
+        return {}
+    return {}

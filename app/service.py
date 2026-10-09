@@ -49,6 +49,22 @@ def now_text() -> str:
     return now_hk().isoformat(timespec="seconds")
 
 
+def _plate_detail(event: dict) -> dict:
+    rows = {
+        "車牌": event.get("plate") or "",
+        "車牌顏色": event.get("plateColor") or "",
+        "車道": event.get("lane"),
+        "方向": event.get("direction") or "",
+        "行車方向": event.get("carDirection") or "",
+        "車型": event.get("vehicleType") or "",
+        "車身顏色": event.get("vehicleColor") or "",
+        "速度": event.get("speed"),
+        "偵測": event.get("detectType") or "",
+        "時間": event.get("time") or "",
+    }
+    return {key: value for key, value in rows.items() if value not in ("", None)}
+
+
 def sample_event() -> dict:
     return {
         "id": "sample",
@@ -255,6 +271,7 @@ class Hub:
             "checkedAt": session.get("checkedAt", ""),
             "lastCommand": session.get("lastCommand", ""),
             "lastCommandAt": session.get("lastCommandAt", ""),
+            "lastDetail": session.get("lastDetail") or {},
             "error": session.get("error", ""),
         }
 
@@ -351,15 +368,20 @@ class Hub:
 
     def _handle_alarm(self, payload: dict):
         if payload.get("commandOnly"):
-            self._note_command(int(payload["commandOnly"]), payload.get("userId"), payload.get("deviceIp"))
+            self._note_command(
+                int(payload["commandOnly"]),
+                payload.get("userId"),
+                payload.get("deviceIp"),
+                payload.get("detail") or {},
+            )
             return
-        command = payload.get("command")
-        if isinstance(command, int):
-            self._note_command(command, payload.get("userId"), payload.get("deviceIp"))
         event = self._store_plate(payload)
         self._forward(event)
+        command = payload.get("command")
+        if isinstance(command, int):
+            self._note_command(command, payload.get("userId"), payload.get("deviceIp"), _plate_detail(event))
 
-    def _note_command(self, command: int, user_id, device_ip: str | None = ""):
+    def _note_command(self, command: int, user_id, device_ip: str | None = "", detail: dict | None = None):
         text = f"0x{int(command):04X}"
         self.last_command = text
         camera = self._camera_for(user_id)
@@ -371,6 +393,7 @@ class Hub:
             session = self.sessions.setdefault(camera["id"], {})
             session["lastCommand"] = text
             session["lastCommandAt"] = now_text()
+            session["lastDetail"] = dict(detail or {})
 
     def _store_plate(self, payload: dict) -> dict:
         camera = self._camera_for(payload.get("userId"))

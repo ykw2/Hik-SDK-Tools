@@ -54,7 +54,29 @@
     main { padding: 0 24px 32px; }
     .panel { display: none; }
     .panel.active { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
-    #panel-events.active, #panel-logs.active { grid-template-columns: 1fr; }
+    #panel-cameras.active, #panel-events.active, #panel-logs.active { grid-template-columns: 1fr; }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 36, 48, 0.45);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px;
+      z-index: 20;
+    }
+    .modal.open { display: flex; }
+    .modal .card { width: min(440px, 100%); max-height: calc(100vh - 96px); overflow: auto; }
+    button.linkish {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    button.linkish:disabled { cursor: default; color: var(--muted); }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -130,26 +152,6 @@
   </nav>
   <main>
     <section id="panel-cameras" class="panel active">
-      <form id="camera-form" class="card">
-        <strong id="cam-title">新增鏡頭</strong>
-        <p id="cam-mode" class="hint">這裡是新增，不會改到右邊已有的鏡頭。</p>
-        <input id="cam-id" type="hidden">
-        <label for="cam-name">名稱</label>
-        <input id="cam-name" placeholder="入口1">
-        <label for="cam-host">IP</label>
-        <input id="cam-host" placeholder="192.168.1.64" required>
-        <label for="cam-port">SDK 埠</label>
-        <input id="cam-port" type="number" value="8000">
-        <label for="cam-user">帳號</label>
-        <input id="cam-user" value="admin">
-        <label for="cam-pass">密碼</label>
-        <input id="cam-pass" type="password" placeholder="新鏡頭要填密碼">
-        <label class="check"><input id="cam-auto" type="checkbox"> 程式啟動時自動布防</label>
-        <div class="actions" style="margin-top:12px;display:flex;gap:8px;">
-          <button id="cam-save" class="primary" type="submit">新增</button>
-          <button id="cam-reset" type="button">清空</button>
-        </div>
-      </form>
       <div class="card">
         <table>
           <thead><tr><th>名稱</th><th>位址</th><th>布防</th><th>上線</th><th>最近報警</th><th></th></tr></thead>
@@ -211,6 +213,38 @@
       </div>
     </section>
   </main>
+  <div id="cam-modal" class="modal">
+    <form id="camera-form" class="card">
+      <strong id="cam-title">新增鏡頭</strong>
+      <p id="cam-mode" class="hint">這是新增，不會改到已有的鏡頭。</p>
+      <input id="cam-id" type="hidden">
+      <label for="cam-name">名稱</label>
+      <input id="cam-name" placeholder="入口1">
+      <label for="cam-host">IP</label>
+      <input id="cam-host" placeholder="192.168.1.64" required>
+      <label for="cam-port">SDK 埠</label>
+      <input id="cam-port" type="number" value="8000">
+      <label for="cam-user">帳號</label>
+      <input id="cam-user" value="admin">
+      <label for="cam-pass">密碼</label>
+      <input id="cam-pass" type="password" placeholder="新鏡頭要填密碼">
+      <label class="check"><input id="cam-auto" type="checkbox"> 程式啟動時自動布防</label>
+      <div class="actions" style="margin-top:12px;display:flex;gap:8px;">
+        <button id="cam-save" class="primary" type="submit">新增</button>
+        <button id="cam-reset" type="button">清空</button>
+        <button id="cam-close" type="button">關閉</button>
+      </div>
+    </form>
+  </div>
+  <div id="alarm-modal" class="modal">
+    <div class="card">
+      <strong id="alarm-title">報警詳細</strong>
+      <div id="alarm-body" style="margin-top:12px;"></div>
+      <div class="actions" style="margin-top:12px;">
+        <button id="alarm-close" type="button">關閉</button>
+      </div>
+    </div>
+  </div>
   <div id="toast"></div>
   <script>
     const FIELDS = ["time","plate","plateRaw","plateColor","plateType","confidence","lane","direction","carDirection","vehicleType","vehicleColor","speed","detectType","device","cameraName","monitoringSite","deviceNo","sceneImage","plateImage"];
@@ -321,8 +355,12 @@
         }
         tr.appendChild(online);
         const alarm = document.createElement("td");
-        const alarmLabel = document.createElement("div");
+        const alarmLabel = document.createElement("button");
+        alarmLabel.type = "button";
+        alarmLabel.className = "linkish";
         alarmLabel.textContent = alarmText(cam);
+        alarmLabel.disabled = !cam.lastCommand;
+        alarmLabel.onclick = () => showAlarm(cam);
         alarm.appendChild(alarmLabel);
         if (cam.lastCommandAt) {
           const when = document.createElement("div");
@@ -344,6 +382,7 @@
           document.getElementById("cam-pass").value = "";
           document.getElementById("cam-auto").checked = !!cam.autoArm;
           setCameraMode(cam.name);
+          openCamModal();
         };
         const arm = document.createElement("button");
         arm.type = "button";
@@ -533,7 +572,7 @@
       }
       document.getElementById("cam-id").value = "";
       title.textContent = "新增鏡頭";
-      mode.textContent = "這裡是新增，不會改到右邊已有的鏡頭。";
+      mode.textContent = "這是新增，不會改到已有的鏡頭。";
       save.textContent = "新增";
       pass.placeholder = "新鏡頭要填密碼";
     }
@@ -562,15 +601,59 @@
         });
         toast(editing ? "鏡頭已更新" : "已新增鏡頭");
         resetCameraForm();
+        closeCamModal();
         refresh();
       } catch (err) { toast(err.message); }
     };
     document.getElementById("cam-reset").onclick = () => resetCameraForm();
+    function openCamModal() {
+      document.getElementById("cam-modal").classList.add("open");
+    }
+    function closeCamModal() {
+      document.getElementById("cam-modal").classList.remove("open");
+    }
+    function showAlarm(cam) {
+      const title = document.getElementById("alarm-title");
+      const body = document.getElementById("alarm-body");
+      title.textContent = (cam.name || "鏡頭") + " · " + alarmText(cam);
+      body.replaceChildren();
+      const rows = [["時間", cam.lastCommandAt || ""]];
+      const detail = cam.lastDetail || {};
+      Object.keys(detail).forEach((key) => rows.push([key, detail[key]]));
+      if (rows.length === 1 && !rows[0][1]) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = "這筆報警沒有更多欄位。";
+        body.appendChild(empty);
+      } else {
+        rows.forEach(([key, value]) => {
+          if (value === "" || value === null || value === undefined) return;
+          const line = document.createElement("div");
+          const name = document.createElement("div");
+          name.className = "hint";
+          name.textContent = key;
+          const text = document.createElement("div");
+          text.textContent = String(value);
+          line.append(name, text);
+          body.appendChild(line);
+        });
+      }
+      document.getElementById("alarm-modal").classList.add("open");
+    }
     document.getElementById("cam-add").onclick = () => {
       resetCameraForm();
-      const name = document.getElementById("cam-name");
-      document.getElementById("camera-form").scrollIntoView({ block: "nearest" });
-      name.focus();
+      openCamModal();
+      document.getElementById("cam-name").focus();
+    };
+    document.getElementById("cam-close").onclick = () => closeCamModal();
+    document.getElementById("cam-modal").onclick = (event) => {
+      if (event.target.id === "cam-modal") closeCamModal();
+    };
+    document.getElementById("alarm-close").onclick = () => {
+      document.getElementById("alarm-modal").classList.remove("open");
+    };
+    document.getElementById("alarm-modal").onclick = (event) => {
+      if (event.target.id === "alarm-modal") document.getElementById("alarm-modal").classList.remove("open");
     };
     document.getElementById("rule-example").onclick = () => {
       document.getElementById("rule-template").value = JSON.stringify(EXAMPLE, null, 2);

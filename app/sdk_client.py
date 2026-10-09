@@ -8,7 +8,7 @@ import os
 from ctypes import c_int32, c_uint32, c_void_p
 from pathlib import Path
 
-from app.parser import parse_alarm, read_device_ip, read_user_id
+from app.parser import parse_alarm, read_device_ip, read_user_id, summarize_command
 from app.sdk_structs import COMM_ITS_PLATE_RESULT, COMM_UPLOAD_PLATE_RESULT, get_structs
 
 log = logging.getLogger(__name__)
@@ -301,6 +301,7 @@ class SdkClient:
                     "commandOnly": command,
                     "userId": read_user_id(int(alarmer or 0)),
                     "deviceIp": read_device_ip(int(alarmer or 0)),
+                    "detail": summarize_command(command, int(info or 0), int(buf_len)),
                 })
                 return
             parsed = parse_alarm(int(command), int(info or 0), int(buf_len))

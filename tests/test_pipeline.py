@@ -237,10 +237,24 @@ class OnlineTests(unittest.TestCase):
         )
         hub.sessions[saved["id"]] = {"status": "armed", "userId": 4, "handle": 1}
         hub._by_user[4] = saved["id"]
-        hub._handle_alarm({"commandOnly": 0x4000, "userId": 4, "deviceIp": "192.168.38.202"})
+        hub._handle_alarm({
+            "commandOnly": 0x4000,
+            "userId": 4,
+            "deviceIp": "192.168.38.202",
+            "detail": {"報警類型": "移動偵測", "輸入號": 1},
+        })
         view = hub.cameras()[0]
         self.assertEqual(view["lastCommand"], "0x4000")
+        self.assertEqual(view["lastDetail"]["報警類型"], "移動偵測")
         self.assertTrue(view["lastCommandAt"].endswith("+08:00"))
+
+    def test_alarm_v30_summary(self):
+        from app.parser import summarize_command
+
+        buf = (ctypes.c_uint32 * 2)(3, 2)
+        detail = summarize_command(0x4000, ctypes.addressof(buf), ctypes.sizeof(buf))
+        self.assertEqual(detail["報警類型"], "移動偵測")
+        self.assertEqual(detail["輸入號"], 2)
 
 
 if __name__ == "__main__":
