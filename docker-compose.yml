@@ -11,4 +11,5 @@ services:
       DATA_DIR: /app/data
       APP_PORT: "8123"
       LD_LIBRARY_PATH: /opt/hiksdk
+      TZ: Asia/Hong_Kong
     restart: unless-stopped

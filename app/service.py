@@ -8,6 +8,7 @@ import queue
 import threading
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from app.config_store import ConfigStore
@@ -37,8 +38,15 @@ def online_from_exception(typ: int) -> str | None:
     return None
 
 
+HK = ZoneInfo("Asia/Hong_Kong")
+
+
+def now_hk() -> datetime:
+    return datetime.now(HK)
+
+
 def now_text() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return now_hk().isoformat(timespec="seconds")
 
 
 def sample_event() -> dict:
@@ -129,6 +137,9 @@ class Hub:
         return [self._camera_view(item) for item in self.config.cameras()]
 
     def save_camera(self, payload: dict) -> dict:
+        payload = dict(payload)
+        if payload.get("create"):
+            payload["id"] = ""
         was_armed = False
         camera_id = payload.get("id")
         if camera_id and self.sessions.get(camera_id, {}).get("status") == "armed":
@@ -348,7 +359,7 @@ class Hub:
 
     def _store_plate(self, payload: dict) -> dict:
         camera = self._camera_for(payload.get("userId"))
-        event_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+        event_id = now_hk().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         scene = ""
         plate_image = ""
         for image in payload.get("images") or []:

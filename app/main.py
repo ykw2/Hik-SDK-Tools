@@ -21,7 +21,7 @@ async def lifespan(_app: FastAPI):
     hub.stop()
 
 
-app = FastAPI(title="卡口車牌", lifespan=lifespan)
+app = FastAPI(title="SDK Endpoint", lifespan=lifespan)
 
 
 def _call(fn):

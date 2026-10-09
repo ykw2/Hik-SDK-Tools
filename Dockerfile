@@ -1,7 +1,8 @@
 FROM python:3.11-slim-bookworm
 
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Hong_Kong
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libstdc++6 zlib1g ca-certificates \
+    && apt-get install -y --no-install-recommends libstdc++6 zlib1g ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

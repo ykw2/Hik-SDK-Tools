@@ -73,6 +73,7 @@ class ParseTests(unittest.TestCase):
                     self.assertTrue(event["images"])
                     self.assertEqual(event["images"][0]["bytes"][:2], b"\xff\xd8")
                     self.assertTrue(event["time"].startswith("2026-10-09T01:22:30"))
+                    self.assertTrue(event["time"].endswith("+08:00"))
                     del image
 
 
@@ -151,9 +152,39 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(listed.json()[0]["plate"], "粵B12345")
             page = client.get("/")
             self.assertEqual(page.status_code, 200)
-            self.assertIn("卡口車牌", page.text)
+            self.assertIn("SDK Endpoint", page.text)
             self.assertIn("發布規則", page.text)
+            self.assertNotIn("卡口車牌", page.text)
+            self.assertNotIn("布防收出入口結果", page.text)
             self.assertIn("上線", page.text)
+            first = client.post(
+                "/api/cameras",
+                json={"name": "入口", "host": "192.168.38.14", "port": 8000, "username": "admin", "password": "a"},
+            )
+            second = client.post(
+                "/api/cameras",
+                json={"name": "face", "host": "192.168.77.230", "port": 8000, "username": "admin", "password": "b"},
+            )
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(second.status_code, 200, second.text)
+            third = client.post(
+                "/api/cameras",
+                json={
+                    "create": True,
+                    "id": second.json()["id"],
+                    "name": "第三台",
+                    "host": "192.168.77.37",
+                    "port": 8000,
+                    "username": "admin",
+                    "password": "c",
+                },
+            )
+            self.assertEqual(third.status_code, 200, third.text)
+            hosts = [item["host"] for item in client.get("/api/cameras").json()]
+            self.assertEqual(hosts.count("192.168.38.14"), 1)
+            self.assertEqual(hosts.count("192.168.77.230"), 1)
+            self.assertEqual(hosts.count("192.168.77.37"), 1)
+            self.assertNotEqual(third.json()["id"], second.json()["id"])
 
 
 class OnlineTests(unittest.TestCase):

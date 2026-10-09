@@ -127,6 +127,12 @@ def plate_score(plate: str, confidence: int) -> int:
     return score
 
 
+def _as_hk(stamp: str) -> str:
+    if not stamp or "+" in stamp:
+        return stamp
+    return stamp + "+08:00"
+
+
 def _abs_time(raw) -> str:
     text = decode_gbk(raw)
     digits = "".join(ch for ch in text if ch.isdigit())
@@ -138,7 +144,7 @@ def _abs_time(raw) -> str:
     stamp = f"{y}-{m}-{d}T{hh}:{mm}:{ss}"
     if ms:
         stamp += f".{ms}"
-    return stamp
+    return _as_hk(stamp)
 
 
 def _time_v30(value) -> str:
@@ -152,7 +158,7 @@ def _time_v30(value) -> str:
     )
     if ms:
         stamp += f".{ms:03d}"
-    return stamp
+    return _as_hk(stamp)
 
 
 def _plausible_ptr(ptr, length) -> bool:

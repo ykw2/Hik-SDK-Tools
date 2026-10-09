@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>卡口車牌</title>
+  <title>SDK Endpoint</title>
   <style>
     :root {
       --ink: #1c2430;
@@ -118,8 +118,7 @@
 <body>
   <header>
     <div>
-      <h1>卡口車牌</h1>
-      <div class="sub">布防收出入口結果。本頁顯示原始資料，發布出去的是改過的 JSON。</div>
+      <h1>SDK Endpoint</h1>
     </div>
     <div id="sdk-status">正在檢查 SDK…</div>
   </header>
@@ -132,7 +131,8 @@
   <main>
     <section id="panel-cameras" class="panel active">
       <form id="camera-form" class="card">
-        <strong>鏡頭</strong>
+        <strong id="cam-title">新增鏡頭</strong>
+        <p id="cam-mode" class="hint">這裡是新增，不會改到右邊已有的鏡頭。</p>
         <input id="cam-id" type="hidden">
         <label for="cam-name">名稱</label>
         <input id="cam-name" placeholder="入口1">
@@ -143,10 +143,10 @@
         <label for="cam-user">帳號</label>
         <input id="cam-user" value="admin">
         <label for="cam-pass">密碼</label>
-        <input id="cam-pass" type="password" placeholder="留空表示不改">
+        <input id="cam-pass" type="password" placeholder="新鏡頭要填密碼">
         <label class="check"><input id="cam-auto" type="checkbox"> 程式啟動時自動布防</label>
         <div class="actions" style="margin-top:12px;display:flex;gap:8px;">
-          <button id="cam-save" class="primary" type="submit">儲存</button>
+          <button id="cam-save" class="primary" type="submit">新增</button>
           <button id="cam-reset" type="button">清空</button>
         </div>
       </form>
@@ -317,6 +317,7 @@
           document.getElementById("cam-user").value = cam.username;
           document.getElementById("cam-pass").value = "";
           document.getElementById("cam-auto").checked = !!cam.autoArm;
+          setCameraMode(cam.name);
         };
         const arm = document.createElement("button");
         arm.type = "button";
@@ -492,13 +493,39 @@
       renderRules();
       renderLogs(logs);
     }
+    function setCameraMode(editingName) {
+      const title = document.getElementById("cam-title");
+      const mode = document.getElementById("cam-mode");
+      const save = document.getElementById("cam-save");
+      const pass = document.getElementById("cam-pass");
+      if (editingName) {
+        title.textContent = "正在修改：" + editingName;
+        mode.textContent = "會更新這一支。要另加一台請先按清空。";
+        save.textContent = "更新";
+        pass.placeholder = "留空表示不改";
+        return;
+      }
+      document.getElementById("cam-id").value = "";
+      title.textContent = "新增鏡頭";
+      mode.textContent = "這裡是新增，不會改到右邊已有的鏡頭。";
+      save.textContent = "新增";
+      pass.placeholder = "新鏡頭要填密碼";
+    }
+    function resetCameraForm() {
+      document.getElementById("camera-form").reset();
+      document.getElementById("cam-port").value = 8000;
+      document.getElementById("cam-user").value = "admin";
+      setCameraMode("");
+    }
     document.getElementById("camera-form").onsubmit = async (event) => {
       event.preventDefault();
+      const editing = document.getElementById("cam-save").textContent === "更新";
       try {
         await api("/api/cameras", {
           method: "POST",
           body: JSON.stringify({
-            id: document.getElementById("cam-id").value,
+            create: !editing,
+            id: editing ? document.getElementById("cam-id").value : "",
             name: document.getElementById("cam-name").value,
             host: document.getElementById("cam-host").value,
             port: Number(document.getElementById("cam-port").value || 8000),
@@ -507,18 +534,12 @@
             autoArm: document.getElementById("cam-auto").checked
           })
         });
-        toast("鏡頭已儲存");
-        document.getElementById("camera-form").reset();
-        document.getElementById("cam-port").value = 8000;
-        document.getElementById("cam-user").value = "admin";
+        toast(editing ? "鏡頭已更新" : "已新增鏡頭");
+        resetCameraForm();
         refresh();
       } catch (err) { toast(err.message); }
     };
-    document.getElementById("cam-reset").onclick = () => {
-      document.getElementById("camera-form").reset();
-      document.getElementById("cam-port").value = 8000;
-      document.getElementById("cam-user").value = "admin";
-    };
+    document.getElementById("cam-reset").onclick = () => resetCameraForm();
     document.getElementById("rule-example").onclick = () => {
       document.getElementById("rule-template").value = JSON.stringify(EXAMPLE, null, 2);
     };
