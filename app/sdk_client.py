@@ -297,7 +297,11 @@ class SdkClient:
         try:
             command = int(command)
             if command not in (COMM_ITS_PLATE_RESULT, COMM_UPLOAD_PLATE_RESULT):
-                self.on_alarm({"commandOnly": command})
+                self.on_alarm({
+                    "commandOnly": command,
+                    "userId": read_user_id(int(alarmer or 0)),
+                    "deviceIp": read_device_ip(int(alarmer or 0)),
+                })
                 return
             parsed = parse_alarm(int(command), int(info or 0), int(buf_len))
             if not parsed:

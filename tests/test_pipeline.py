@@ -221,6 +221,27 @@ class OnlineTests(unittest.TestCase):
         self.assertEqual(view["online"], "offline")
         self.assertNotEqual(view["checkedAt"], "2026-10-09T09:00:00")
 
+    def test_alarm_is_kept_on_that_camera(self):
+        from app.service import Hub
+
+        os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="hik-alarm-")
+        hub = Hub()
+        saved = hub.config.upsert_camera(
+            {
+                "name": "cctv",
+                "host": "192.168.38.202",
+                "port": 8000,
+                "username": "admin",
+                "password": "x",
+            }
+        )
+        hub.sessions[saved["id"]] = {"status": "armed", "userId": 4, "handle": 1}
+        hub._by_user[4] = saved["id"]
+        hub._handle_alarm({"commandOnly": 0x4000, "userId": 4, "deviceIp": "192.168.38.202"})
+        view = hub.cameras()[0]
+        self.assertEqual(view["lastCommand"], "0x4000")
+        self.assertTrue(view["lastCommandAt"].endswith("+08:00"))
+
 
 if __name__ == "__main__":
     unittest.main()

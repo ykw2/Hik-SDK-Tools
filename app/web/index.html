@@ -152,9 +152,12 @@
       </form>
       <div class="card">
         <table>
-          <thead><tr><th>名稱</th><th>位址</th><th>布防</th><th>上線</th><th></th></tr></thead>
+          <thead><tr><th>名稱</th><th>位址</th><th>布防</th><th>上線</th><th>最近報警</th><th></th></tr></thead>
           <tbody id="camera-list"></tbody>
         </table>
+        <div class="actions" style="margin-top:12px;">
+          <button id="cam-add" type="button">新增</button>
+        </div>
       </div>
     </section>
     <section id="panel-events" class="panel">
@@ -261,6 +264,18 @@
       if (cam.online === "reconnecting") return "重連中";
       return "確認中";
     }
+    const ALARM_NAMES = {
+      "0x3050": "車牌",
+      "0x2800": "車牌",
+      "0x3058": "名單同步",
+      "0x3059": "名單車輛",
+      "0x4000": "一般報警"
+    };
+    function alarmText(cam) {
+      if (!cam.lastCommand) return "—";
+      const name = ALARM_NAMES[cam.lastCommand];
+      return name ? cam.lastCommand + " " + name : cam.lastCommand;
+    }
     function onlineClass(cam) {
       if (cam.status !== "armed") return "";
       if (cam.online === "online") return "ok";
@@ -274,7 +289,7 @@
       if (!state.cameras.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 5;
+        td.colSpan = 6;
         td.textContent = "還沒有鏡頭";
         tr.appendChild(td);
         body.appendChild(tr);
@@ -305,6 +320,17 @@
           online.appendChild(when);
         }
         tr.appendChild(online);
+        const alarm = document.createElement("td");
+        const alarmLabel = document.createElement("div");
+        alarmLabel.textContent = alarmText(cam);
+        alarm.appendChild(alarmLabel);
+        if (cam.lastCommandAt) {
+          const when = document.createElement("div");
+          when.className = "hint";
+          when.textContent = String(cam.lastCommandAt).slice(11, 19);
+          alarm.appendChild(when);
+        }
+        tr.appendChild(alarm);
         const ops = document.createElement("td");
         const edit = document.createElement("button");
         edit.type = "button";
@@ -482,7 +508,7 @@
       ]);
       const sdk = document.getElementById("sdk-status");
       sdk.textContent = status.sdkLoaded
-        ? "SDK 已載入 · 布防 " + status.armed + " 支 · 在線 " + (status.online || 0) + " 支" + (status.lastCommand ? " · 最近報警 " + status.lastCommand : "")
+        ? "SDK 已載入 · 布防 " + status.armed + " 支 · 在線 " + (status.online || 0) + " 支"
         : "SDK 未載入：" + (status.sdkError || "把 SDK 放到 sdk 資料夾");
       sdk.className = status.sdkLoaded ? "ok" : "warn";
       state.cameras = cameras;
@@ -540,6 +566,12 @@
       } catch (err) { toast(err.message); }
     };
     document.getElementById("cam-reset").onclick = () => resetCameraForm();
+    document.getElementById("cam-add").onclick = () => {
+      resetCameraForm();
+      const name = document.getElementById("cam-name");
+      document.getElementById("camera-form").scrollIntoView({ block: "nearest" });
+      name.focus();
+    };
     document.getElementById("rule-example").onclick = () => {
       document.getElementById("rule-template").value = JSON.stringify(EXAMPLE, null, 2);
     };

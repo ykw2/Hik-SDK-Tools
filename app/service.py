@@ -253,6 +253,8 @@ class Hub:
             "status": session.get("status", "idle"),
             "online": session.get("online", "unknown"),
             "checkedAt": session.get("checkedAt", ""),
+            "lastCommand": session.get("lastCommand", ""),
+            "lastCommandAt": session.get("lastCommandAt", ""),
             "error": session.get("error", ""),
         }
 
@@ -349,13 +351,26 @@ class Hub:
 
     def _handle_alarm(self, payload: dict):
         if payload.get("commandOnly"):
-            self.last_command = f"0x{int(payload['commandOnly']):04X}"
+            self._note_command(int(payload["commandOnly"]), payload.get("userId"), payload.get("deviceIp"))
             return
         command = payload.get("command")
         if isinstance(command, int):
-            self.last_command = f"0x{command:04X}"
+            self._note_command(command, payload.get("userId"), payload.get("deviceIp"))
         event = self._store_plate(payload)
         self._forward(event)
+
+    def _note_command(self, command: int, user_id, device_ip: str | None = ""):
+        text = f"0x{int(command):04X}"
+        self.last_command = text
+        camera = self._camera_for(user_id)
+        if not camera and device_ip:
+            camera = next((item for item in self.config.cameras() if item.get("host") == device_ip), None)
+        if not camera:
+            return
+        with self._lock:
+            session = self.sessions.setdefault(camera["id"], {})
+            session["lastCommand"] = text
+            session["lastCommandAt"] = now_text()
 
     def _store_plate(self, payload: dict) -> dict:
         camera = self._camera_for(payload.get("userId"))
