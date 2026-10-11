@@ -35,7 +35,7 @@
     .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
     #sdk-status { font-size: 13px; text-align: right; }
     nav { display: flex; gap: 8px; padding: 0 24px 12px; flex-wrap: wrap; }
-    nav button, .row button, .actions button {
+    nav button, nav a, .row button, .actions button {
       border: 1px solid var(--line);
       background: var(--card);
       color: var(--ink);
@@ -44,6 +44,7 @@
       cursor: pointer;
       font: inherit;
       white-space: nowrap;
+      text-decoration: none;
     }
     nav button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
     .actions button.primary, #cam-save, #rule-save {
@@ -145,10 +146,11 @@
     <div id="sdk-status">正在檢查 SDK…</div>
   </header>
   <nav>
-    <button id="tab-cameras" class="active" type="button">鏡頭</button>
+    <button id="tab-cameras" class="active" type="button">裝置</button>
     <button id="tab-events" type="button">過車結果</button>
     <button id="tab-rules" type="button">發布規則</button>
     <button id="tab-logs" type="button">轉發紀錄</button>
+    <a href="/admin">管理</a>
   </nav>
   <main>
     <section id="panel-cameras" class="panel active">
@@ -166,10 +168,13 @@
       <div class="card">
         <div class="actions" style="display:flex;justify-content:space-between;align-items:center;">
           <strong>最近過車</strong>
-          <button id="btn-simulate" type="button">模擬一筆</button>
+          <div style="display:flex;gap:8px;">
+            <button id="btn-clear-events" type="button">清除全部</button>
+            <button id="btn-simulate" type="button">模擬一筆</button>
+          </div>
         </div>
         <table>
-          <thead><tr><th>時間</th><th>鏡頭</th><th>車牌</th><th>車道</th><th>方向</th><th>車型</th></tr></thead>
+          <thead><tr><th>時間</th><th>裝置</th><th>車牌</th><th>車道</th><th>方向</th><th>車型</th><th></th></tr></thead>
           <tbody id="event-list"></tbody>
         </table>
         <div id="event-detail"></div>
@@ -215,8 +220,8 @@
   </main>
   <div id="cam-modal" class="modal">
     <form id="camera-form" class="card">
-      <strong id="cam-title">新增鏡頭</strong>
-      <p id="cam-mode" class="hint">這是新增，不會改到已有的鏡頭。</p>
+      <strong id="cam-title">新增裝置</strong>
+      <p id="cam-mode" class="hint">這是新增，不會改到已有的裝置。</p>
       <input id="cam-id" type="hidden">
       <label for="cam-name">名稱</label>
       <input id="cam-name" placeholder="入口1">
@@ -227,7 +232,7 @@
       <label for="cam-user">帳號</label>
       <input id="cam-user" value="admin">
       <label for="cam-pass">密碼</label>
-      <input id="cam-pass" type="password" placeholder="新鏡頭要填密碼">
+      <input id="cam-pass" type="password" placeholder="新裝置要填密碼">
       <label class="check"><input id="cam-auto" type="checkbox"> 程式啟動時自動布防</label>
       <div class="actions" style="margin-top:12px;display:flex;gap:8px;">
         <button id="cam-save" class="primary" type="submit">新增</button>
@@ -324,7 +329,7 @@
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.colSpan = 6;
-        td.textContent = "還沒有鏡頭";
+        td.textContent = "還沒有裝置";
         tr.appendChild(td);
         body.appendChild(tr);
         return;
@@ -399,7 +404,7 @@
         del.type = "button";
         del.textContent = "刪除";
         del.onclick = async () => {
-          if (!confirm("刪除這支鏡頭？")) return;
+          if (!confirm("刪除這部裝置？")) return;
           await api("/api/cameras/" + cam.id, { method: "DELETE" });
           refresh();
         };
@@ -414,7 +419,7 @@
       if (!state.events.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 6;
+        td.colSpan = 7;
         td.textContent = "還沒有過車。布防之後，車過閘口就會出現在這裡。";
         tr.appendChild(td);
         body.appendChild(tr);
@@ -438,11 +443,29 @@
           tr.appendChild(td);
         });
         tr.onclick = () => showEvent(ev);
+        const ops = document.createElement("td");
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.textContent = "清除";
+        clear.onclick = async (click) => {
+          click.stopPropagation();
+          if (!confirm("清除這筆過車紀錄？")) return;
+          try {
+            await api("/api/events/" + ev.id, { method: "DELETE" });
+            if (document.getElementById("event-detail").dataset.id === ev.id) {
+              document.getElementById("event-detail").replaceChildren();
+            }
+            refresh();
+          } catch (err) { toast(err.message); }
+        };
+        ops.appendChild(clear);
+        tr.appendChild(ops);
         body.appendChild(tr);
       }
     }
     function showEvent(ev) {
       const box = document.getElementById("event-detail");
+      box.dataset.id = ev.id || "";
       box.replaceChildren();
       const wrap = document.createElement("div");
       wrap.className = "detail";
@@ -571,10 +594,10 @@
         return;
       }
       document.getElementById("cam-id").value = "";
-      title.textContent = "新增鏡頭";
-      mode.textContent = "這是新增，不會改到已有的鏡頭。";
+      title.textContent = "新增裝置";
+      mode.textContent = "這是新增，不會改到已有的裝置。";
       save.textContent = "新增";
-      pass.placeholder = "新鏡頭要填密碼";
+      pass.placeholder = "新裝置要填密碼";
     }
     function resetCameraForm() {
       document.getElementById("camera-form").reset();
@@ -599,7 +622,7 @@
             autoArm: document.getElementById("cam-auto").checked
           })
         });
-        toast(editing ? "鏡頭已更新" : "已新增鏡頭");
+        toast(editing ? "裝置已更新" : "已新增裝置");
         resetCameraForm();
         closeCamModal();
         refresh();
@@ -615,7 +638,7 @@
     function showAlarm(cam) {
       const title = document.getElementById("alarm-title");
       const body = document.getElementById("alarm-body");
-      title.textContent = (cam.name || "鏡頭") + " · " + alarmText(cam);
+      title.textContent = (cam.name || "裝置") + " · " + alarmText(cam);
       body.replaceChildren();
       const rows = [["時間", cam.lastCommandAt || ""]];
       const detail = cam.lastDetail || {};
@@ -685,6 +708,15 @@
         const result = await api("/api/rules/" + id + "/test", { method: "POST" });
         toast(result.ok ? "已送到 " + result.status : result.error);
         show("logs");
+        refresh();
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("btn-clear-events").onclick = async () => {
+      if (!confirm("清除全部過車紀錄？")) return;
+      try {
+        await api("/api/events", { method: "DELETE" });
+        document.getElementById("event-detail").replaceChildren();
+        toast("已清除全部過車紀錄");
         refresh();
       } catch (err) { toast(err.message); }
     };

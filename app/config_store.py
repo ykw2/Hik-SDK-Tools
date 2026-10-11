@@ -1,7 +1,10 @@
-"""鏡頭與發布規則存在 data/config.json。"""
+"""鏡頭、發布規則、白名單與通行碼存在 data/config.json。"""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import ipaddress
 import json
 import threading
 import uuid
@@ -13,7 +16,7 @@ class ConfigStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._data = {"cameras": [], "rules": []}
+        self._data = {"cameras": [], "rules": [], "whitelist": [], "passcodeHash": ""}
         self.load()
 
     def load(self):
@@ -27,6 +30,8 @@ class ConfigStore:
         self._data = {
             "cameras": list(data.get("cameras") or []),
             "rules": list(data.get("rules") or []),
+            "whitelist": [str(item) for item in (data.get("whitelist") or [])],
+            "passcodeHash": str(data.get("passcodeHash") or ""),
         }
 
     def save(self):
@@ -62,7 +67,7 @@ class ConfigStore:
                 "autoArm": bool(payload.get("autoArm")),
             }
             if not item["host"]:
-                raise ValueError("要填鏡頭 IP")
+                raise ValueError("要填裝置 IP")
             if current:
                 current.update(item)
                 stored = current
@@ -117,3 +122,52 @@ class ConfigStore:
         with self._lock:
             self._data["rules"] = [item for item in self._data["rules"] if item["id"] != rule_id]
             self.save()
+
+    def whitelist(self) -> list[str]:
+        with self._lock:
+            return list(self._data.get("whitelist") or [])
+
+    def set_whitelist(self, items: list[str]) -> list[str]:
+        cleaned = normalize_whitelist(items)
+        with self._lock:
+            self._data["whitelist"] = cleaned
+            self.save()
+            return list(cleaned)
+
+    def has_passcode(self) -> bool:
+        with self._lock:
+            return bool(self._data.get("passcodeHash"))
+
+    def set_passcode(self, passcode: str) -> None:
+        digest = hash_passcode(passcode)
+        with self._lock:
+            self._data["passcodeHash"] = digest
+            self.save()
+
+    def check_passcode(self, passcode: str) -> bool:
+        with self._lock:
+            stored = self._data.get("passcodeHash") or ""
+        if not stored:
+            return False
+        return hmac.compare_digest(stored, hash_passcode(passcode))
+
+
+def hash_passcode(passcode: str) -> str:
+    return hashlib.sha256(passcode.encode("utf-8")).hexdigest()
+
+
+def normalize_whitelist(items: list[str]) -> list[str]:
+    cleaned = []
+    seen = set()
+    for raw in items:
+        for piece in str(raw).replace(",", "\n").splitlines():
+            text = piece.strip()
+            if not text or text in seen:
+                continue
+            if "/" in text:
+                ipaddress.ip_network(text, strict=False)
+            else:
+                ipaddress.ip_address(text)
+            seen.add(text)
+            cleaned.append(text)
+    return cleaned

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理</title>
+  <style>
+    :root { --ink: #1c2430; --muted: #5c6b7a; --line: #d5dbe3; --paper: #f3f5f7; --card: #fff; --accent: #0c6b4d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; color: var(--ink); background: var(--paper); }
+    main { max-width: 640px; margin: 0 auto; padding: 28px 16px 48px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    a { color: var(--ink); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-top: 16px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+    textarea { min-height: 140px; font-family: Consolas, "Microsoft JhengHei", monospace; }
+    button { border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    .hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    #toast { position: fixed; right: 16px; bottom: 16px; background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 8px; display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>管理</h1>
+    <p class="hint">通行碼只保護這個頁面。白名單未填時，所有 IP 都能開首頁。填了之後，不在名單的 IP 只會看到空白頁。</p>
+    <p class="hint" id="current-ip"></p>
+    <form id="login-card" class="card">
+      <strong id="login-title">通行碼</strong>
+      <label for="login-code">通行碼</label>
+      <input id="login-code" type="password" autocomplete="current-password">
+      <div class="row"><button class="primary" type="submit">進入</button></div>
+    </form>
+    <div id="settings" style="display:none;">
+      <form id="list-form" class="card">
+        <strong>白名單</strong>
+        <p class="hint">一行一個 IP，也可以寫網段，例如 192.168.77.0/24。儲存後立即生效。</p>
+        <textarea id="whitelist"></textarea>
+        <div class="row"><button class="primary" type="submit">儲存白名單</button></div>
+      </form>
+      <form id="pass-form" class="card">
+        <strong>更改通行碼</strong>
+        <label for="pass-current">目前通行碼</label>
+        <input id="pass-current" type="password" autocomplete="current-password">
+        <label for="pass-next">新通行碼</label>
+        <input id="pass-next" type="password" autocomplete="new-password">
+        <div class="row">
+          <button class="primary" type="submit">更改</button>
+          <button id="logout" type="button">登出</button>
+          <a href="/">回首頁</a>
+        </div>
+      </form>
+    </div>
+  </main>
+  <div id="toast"></div>
+  <script>
+    function toast(text) {
+      const el = document.getElementById("toast");
+      el.textContent = text;
+      el.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { el.style.display = "none"; }, 3200);
+    }
+    async function api(url, options) {
+      const res = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, options));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+    function showSettings(whitelist) {
+      document.getElementById("login-card").style.display = "none";
+      document.getElementById("settings").style.display = "block";
+      document.getElementById("whitelist").value = (whitelist || []).join("\n");
+    }
+    async function boot() {
+      const info = await api("/api/admin/bootstrap");
+      document.getElementById("current-ip").textContent = "你現在的 IP：" + (info.ip || "未知");
+      document.getElementById("login-title").textContent = info.passcodeSet ? "輸入通行碼" : "設定通行碼";
+      document.querySelector("#login-card button").textContent = info.passcodeSet ? "進入" : "設定並進入";
+      try {
+        const settings = await api("/api/admin/settings");
+        showSettings(settings.whitelist);
+      } catch (err) { /* 尚未登入 */ }
+    }
+    document.getElementById("login-card").onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        await api("/api/admin/login", { method: "POST", body: JSON.stringify({ passcode: document.getElementById("login-code").value }) });
+        const settings = await api("/api/admin/settings");
+        showSettings(settings.whitelist);
+        toast("已進入管理頁");
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("list-form").onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        const saved = await api("/api/admin/whitelist", { method: "POST", body: JSON.stringify({ whitelist: document.getElementById("whitelist").value }) });
+        document.getElementById("whitelist").value = saved.whitelist.join("\n");
+        toast("白名單已儲存");
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("pass-form").onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        await api("/api/admin/passcode", {
+          method: "POST",
+          body: JSON.stringify({
+            current: document.getElementById("pass-current").value,
+            next: document.getElementById("pass-next").value
+          })
+        });
+        document.getElementById("pass-current").value = "";
+        document.getElementById("pass-next").value = "";
+        toast("通行碼已更改");
+      } catch (err) { toast(err.message); }
+    };
+    document.getElementById("logout").onclick = async () => {
+      await api("/api/admin/logout", { method: "POST", body: "{}" });
+      location.reload();
+    };
+    boot();
+  </script>
+</body>
+</html>

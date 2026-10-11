@@ -153,7 +153,9 @@ class ApiTests(unittest.TestCase):
             page = client.get("/")
             self.assertEqual(page.status_code, 200)
             self.assertIn("SDK Endpoint", page.text)
+            self.assertIn("裝置", page.text)
             self.assertIn("發布規則", page.text)
+            self.assertIn("清除全部", page.text)
             self.assertNotIn("卡口車牌", page.text)
             self.assertNotIn("布防收出入口結果", page.text)
             self.assertIn("上線", page.text)
@@ -185,6 +187,43 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(hosts.count("192.168.77.230"), 1)
             self.assertEqual(hosts.count("192.168.77.37"), 1)
             self.assertNotEqual(third.json()["id"], second.json()["id"])
+            gone = client.delete("/api/events/" + body["id"])
+            self.assertEqual(gone.status_code, 200, gone.text)
+            self.assertEqual(client.get("/api/events").json(), [])
+            again = client.post("/api/simulate", json={"plate": "粵B99999", "lane": 2})
+            self.assertEqual(again.status_code, 200, again.text)
+            cleared = client.delete("/api/events")
+            self.assertEqual(cleared.status_code, 200, cleared.text)
+            self.assertEqual(client.get("/api/events").json(), [])
+
+
+class AccessTests(unittest.TestCase):
+    def test_whitelist_blanks_other_ips_and_passcode_changes(self):
+        with TestClient(app) as client:
+            open_page = client.get("/")
+            self.assertIn("SDK Endpoint", open_page.text)
+            blocked_login = client.post("/api/admin/login", json={"passcode": "no"})
+            self.assertEqual(blocked_login.status_code, 400)
+            first = client.post("/api/admin/login", json={"passcode": "open-1234"})
+            self.assertEqual(first.status_code, 200, first.text)
+            saved = client.post("/api/admin/whitelist", json={"whitelist": "10.1.2.3\n192.168.77.0/24"})
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(saved.json()["whitelist"], ["10.1.2.3", "192.168.77.0/24"])
+            blank = client.get("/")
+            self.assertEqual(blank.status_code, 200)
+            self.assertEqual(blank.text, "")
+            self.assertEqual(client.get("/api/events").status_code, 404)
+            admin = client.get("/admin")
+            self.assertEqual(admin.status_code, 200)
+            self.assertIn("白名單", admin.text)
+            changed = client.post("/api/admin/passcode", json={"current": "open-1234", "next": "next-5678"})
+            self.assertEqual(changed.status_code, 200, changed.text)
+            client.post("/api/admin/logout")
+            wrong = client.post("/api/admin/login", json={"passcode": "open-1234"})
+            self.assertEqual(wrong.status_code, 401)
+            ok = client.post("/api/admin/login", json={"passcode": "next-5678"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            client.post("/api/admin/whitelist", json={"whitelist": ""})
 
 
 class OnlineTests(unittest.TestCase):
