@@ -104,7 +104,10 @@
     .bad { color: var(--bad); }
     .warn { color: var(--warn); }
     .plate { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
-    .detail { display: grid; grid-template-columns: 220px 1fr; gap: 12px; margin-top: 12px; }
+    .detail { display: grid; gap: 12px; margin-top: 12px; }
+    .shots { display: flex; flex-wrap: wrap; gap: 12px; }
+    .shots figure { margin: 0; width: min(280px, 100%); }
+    .shots figcaption, .detail h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
     img.shot { width: 100%; background: #eef1f4; border-radius: 6px; }
     pre {
       margin: 0;
@@ -463,6 +466,14 @@
         body.appendChild(tr);
       }
     }
+    function eventImages(ev) {
+      if (Array.isArray(ev.images) && ev.images.length) return ev.images;
+      const legacy = [];
+      if (ev.sceneImage) legacy.push({ file: ev.sceneImage, label: "場景" });
+      if (ev.plateImage) legacy.push({ file: ev.plateImage, label: "車牌" });
+      if (ev.sceneImageUrl) legacy.push({ url: ev.sceneImageUrl, label: "場景連結" });
+      return legacy;
+    }
     function showEvent(ev) {
       const box = document.getElementById("event-detail");
       box.dataset.id = ev.id || "";
@@ -470,20 +481,59 @@
       const wrap = document.createElement("div");
       wrap.className = "detail";
       const pics = document.createElement("div");
-      for (const [name, label] of [[ev.sceneImage, "場景"], [ev.plateImage, "車牌圖"]]) {
-        if (!name) continue;
-        const p = document.createElement("div");
-        p.textContent = label;
-        const img = document.createElement("img");
-        img.className = "shot";
-        img.alt = label;
-        img.src = "/api/shots/" + name;
-        pics.append(p, img);
+      pics.className = "shots";
+      const images = eventImages(ev);
+      if (!images.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = "這筆沒有圖片";
+        pics.appendChild(empty);
       }
-      const pre = document.createElement("pre");
-      const copy = Object.assign({}, ev);
-      pre.textContent = JSON.stringify(copy, null, 2);
-      wrap.append(pics, pre);
+      images.forEach((image) => {
+        const figure = document.createElement("figure");
+        const caption = document.createElement("figcaption");
+        caption.textContent = image.label || "圖片";
+        figure.appendChild(caption);
+        if (image.file) {
+          const img = document.createElement("img");
+          img.className = "shot";
+          img.alt = caption.textContent;
+          img.src = "/api/shots/" + image.file;
+          figure.appendChild(img);
+        } else if (image.url) {
+          const link = document.createElement("a");
+          link.href = image.url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          const img = document.createElement("img");
+          img.className = "shot";
+          img.alt = caption.textContent;
+          img.src = image.url;
+          link.appendChild(img);
+          figure.appendChild(link);
+        }
+        pics.appendChild(figure);
+      });
+      const apiTitle = document.createElement("h3");
+      apiTitle.textContent = "API 原始內容";
+      const apiBox = document.createElement("div");
+      const pushes = Array.isArray(ev.pushes) ? ev.pushes : [];
+      if (!pushes.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = "這筆沒有轉發";
+        apiBox.appendChild(empty);
+      }
+      pushes.forEach((push) => {
+        const heading = document.createElement("p");
+        heading.className = "hint";
+        const result = push.ok ? "成功 " + push.status : (push.error || "失敗");
+        heading.textContent = [push.ruleName, push.url, result].filter(Boolean).join(" · ");
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(push.body || {}, null, 2);
+        apiBox.append(heading, pre);
+      });
+      wrap.append(pics, apiTitle, apiBox);
       if (ev.parseWarning) {
         const warn = document.createElement("p");
         warn.className = "warn";

@@ -64,6 +64,22 @@ class EventStore:
             self._rewrite_file({event_id})
             return True
 
+    def replace(self, event: dict) -> None:
+        event_id = event.get("id")
+        with self._lock:
+            items = []
+            found = False
+            for item in self._events:
+                if item.get("id") == event_id:
+                    items.append(event)
+                    found = True
+                else:
+                    items.append(item)
+            if not found:
+                items.insert(0, event)
+            self._events = deque(items, maxlen=self._events.maxlen)
+            self._replace_in_file(event)
+
     def clear(self) -> None:
         with self._lock:
             self._events.clear()
@@ -87,13 +103,42 @@ class EventStore:
         return None
 
     def _remove_images(self, event: dict) -> None:
+        names = []
+        for image in event.get("images") or []:
+            if isinstance(image, dict):
+                names.append(str(image.get("file") or ""))
         for key in ("sceneImage", "plateImage"):
-            name = str(event.get(key) or "")
+            names.append(str(event.get(key) or ""))
+        for name in names:
             if not name:
                 continue
             target = self.shots / Path(name).name
             if target.is_file():
                 target.unlink()
+
+    def _replace_in_file(self, event: dict) -> None:
+        event_id = event.get("id")
+        lines = []
+        replaced = False
+        if self.path.exists():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    item = json.loads(text)
+                except json.JSONDecodeError:
+                    lines.append(text)
+                    continue
+                if item.get("id") == event_id:
+                    if not replaced:
+                        lines.append(json.dumps(event, ensure_ascii=False))
+                        replaced = True
+                    continue
+                lines.append(text)
+        if not replaced:
+            lines.append(json.dumps(event, ensure_ascii=False))
+        self.path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
 
     def _rewrite_file(self, drop_ids: set[str]) -> None:
         lines = []
@@ -111,8 +156,8 @@ class EventStore:
                 lines.append(text)
         self.path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
 
-    def save_image(self, event_id: str, role: str, blob: bytes) -> str:
-        name = f"{event_id}_{role}.jpg"
+    def save_image(self, event_id: str, role: str, blob: bytes, index: int = 0) -> str:
+        name = f"{event_id}_{index}_{role}.jpg"
         target = self.shots / name
         target.write_bytes(blob)
         return name

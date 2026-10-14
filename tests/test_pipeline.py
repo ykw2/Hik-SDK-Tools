@@ -156,6 +156,7 @@ class ApiTests(unittest.TestCase):
             self.assertIn("裝置", page.text)
             self.assertIn("發布規則", page.text)
             self.assertIn("清除全部", page.text)
+            self.assertIn("API 原始內容", page.text)
             self.assertNotIn("卡口車牌", page.text)
             self.assertNotIn("布防收出入口結果", page.text)
             self.assertIn("上線", page.text)
@@ -195,6 +196,70 @@ class ApiTests(unittest.TestCase):
             cleared = client.delete("/api/events")
             self.assertEqual(cleared.status_code, 200, cleared.text)
             self.assertEqual(client.get("/api/events").json(), [])
+
+    def test_event_keeps_every_image_and_push_body(self):
+        from app.main import hub
+
+        received = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                received["body"] = json.loads(self.rfile.read(length).decode("utf-8"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, _fmt, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        rule_id = ""
+        event = None
+        try:
+            port = server.server_address[1]
+            rule = hub.config.upsert_rule(
+                {
+                    "name": "原始內容",
+                    "url": f"http://127.0.0.1:{port}/plate",
+                    "method": "POST",
+                    "enabled": True,
+                    "headers": {},
+                    "template": {"license": "{{plate}}", "laneNo": "{{lane}}"},
+                }
+            )
+            rule_id = rule["id"]
+            event = hub._store_plate(
+                {
+                    "plate": "粵Z00001",
+                    "lane": 3,
+                    "images": [
+                        {"kind": 1, "bytes": b"\xff\xd8scene"},
+                        {"kind": 0, "bytes": b"\xff\xd8plate"},
+                        {"kind": 2, "bytes": b"\xff\xd8merge"},
+                        {"kind": 1, "url": "http://192.168.1.64/pic.jpg"},
+                    ],
+                }
+            )
+            self.assertEqual([item["label"] for item in event["images"]], ["場景", "車牌", "合成", "場景 2"])
+            for item in event["images"][:3]:
+                self.assertTrue((hub.store.shots / item["file"]).is_file())
+            hub._forward(event)
+            self.assertEqual(event["pushes"][0]["body"], {"license": "粵Z00001", "laneNo": 3})
+            self.assertEqual(received["body"], {"license": "粵Z00001", "laneNo": 3})
+            listed = next(item for item in hub.store.list() if item["id"] == event["id"])
+            self.assertEqual(listed["pushes"][0]["body"]["license"], "粵Z00001")
+        finally:
+            server.shutdown()
+            if rule_id:
+                hub.config.delete_rule(rule_id)
+            if event:
+                names = [item.get("file") for item in event["images"]]
+                hub.store.delete(event["id"])
+                for name in names:
+                    if name:
+                        self.assertFalse((hub.store.shots / name).exists())
 
 
 class AccessTests(unittest.TestCase):

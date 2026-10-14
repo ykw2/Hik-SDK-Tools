@@ -26,6 +26,18 @@ OFFLINE_TYPES = {0x8000, 0x8002, 0x8044}
 RECONNECT_TYPES = {0x8006, 0x8040}
 REARM_TYPES = OFFLINE_TYPES | {0x8006}
 PROBE_SECONDS = 15
+IMAGE_LABELS = {
+    0: "車牌",
+    1: "場景",
+    2: "合成",
+    3: "特寫",
+    4: "二值",
+    5: "碼流",
+    6: "人臉",
+    7: "駕駛",
+    8: "非機動車",
+    9: "行人",
+}
 
 
 def online_from_exception(typ: int) -> str | None:
@@ -400,15 +412,25 @@ class Hub:
         event_id = now_hk().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         scene = ""
         plate_image = ""
-        for image in payload.get("images") or []:
-            if image.get("url"):
-                payload["sceneImageUrl"] = image["url"]
+        images = []
+        label_count: dict[str, int] = {}
+        for index, image in enumerate(payload.get("images") or []):
+            kind = image.get("kind")
+            base = IMAGE_LABELS.get(kind, "圖片")
+            label_count[base] = label_count.get(base, 0) + 1
+            label = base if label_count[base] == 1 else f"{base} {label_count[base]}"
+            url = str(image.get("url") or "")
+            if url:
+                images.append({"kind": kind, "label": label, "url": url})
+                if kind == 1 and not payload.get("sceneImageUrl"):
+                    payload["sceneImageUrl"] = url
                 continue
             blob = image.get("bytes")
             if not blob:
                 continue
-            role = {0: "plate", 1: "scene", 2: "merge"}.get(image.get("kind"), f"pic{image.get('kind')}")
-            name = self.store.save_image(event_id, role, blob)
+            role = {0: "plate", 1: "scene", 2: "merge"}.get(kind, f"pic{kind if kind is not None else index}")
+            name = self.store.save_image(event_id, role, blob, index)
+            images.append({"kind": kind, "label": label, "file": name})
             if role == "plate" and not plate_image:
                 plate_image = name
             elif role == "scene" and not scene:
@@ -438,6 +460,8 @@ class Hub:
             "deviceNo": payload.get("deviceNo") or "",
             "sceneImage": scene,
             "plateImage": plate_image,
+            "images": images,
+            "pushes": [],
             "sceneImageUrl": payload.get("sceneImageUrl") or "",
             "layout": payload.get("layout") or "",
             "structSize": payload.get("structSize") or 0,
@@ -450,12 +474,25 @@ class Hub:
         return event
 
     def _forward(self, event: dict):
+        pushes = []
         for rule in self.config.rules():
             if not rule.get("enabled", True):
                 continue
             result = self.forwarder.send(rule, event)
             result["time"] = now_text()
             self.store.add_log(result)
+            pushes.append(
+                {
+                    "ruleName": result.get("ruleName") or "",
+                    "url": result.get("url") or "",
+                    "ok": bool(result.get("ok")),
+                    "status": result.get("status") or 0,
+                    "error": result.get("error") or "",
+                    "body": result.get("body") if isinstance(result.get("body"), dict) else {},
+                }
+            )
+        event["pushes"] = pushes
+        self.store.replace(event)
 
     def _camera_for(self, user_id) -> dict | None:
         if user_id is None or int(user_id) < 0:
