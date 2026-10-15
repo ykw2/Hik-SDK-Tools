@@ -14,10 +14,13 @@ class EventStore:
         self.shots = self.data_dir / "shots"
         self.shots.mkdir(parents=True, exist_ok=True)
         self.path = self.data_dir / "events.jsonl"
+        self.access_path = self.data_dir / "access.jsonl"
         self._lock = threading.Lock()
         self._events = deque(maxlen=300)
         self._logs = deque(maxlen=300)
+        self._access = deque(maxlen=200)
         self._load()
+        self._load_access()
 
     def _load(self):
         if not self.path.exists():
@@ -34,6 +37,32 @@ class EventStore:
                 self._events.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+
+    def _load_access(self):
+        if not self.access_path.exists():
+            return
+        lines = self.access_path.read_text(encoding="utf-8").splitlines()
+        if len(lines) > 1000:
+            lines = lines[-200:]
+            self.access_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        for line in reversed(lines[-200:]):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                self._access.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    def add_access(self, event: dict):
+        with self._lock:
+            self._access.appendleft(event)
+            with self.access_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def access_list(self, limit: int = 30) -> list:
+        with self._lock:
+            return list(self._access)[:limit]
 
     def add(self, event: dict):
         with self._lock:
@@ -84,8 +113,10 @@ class EventStore:
         with self._lock:
             self._events.clear()
             self.path.write_text("", encoding="utf-8")
+            keep = {str(item.get("image") or "") for item in self._access}
             for image in self.shots.glob("*.jpg"):
-                image.unlink(missing_ok=True)
+                if image.name not in keep:
+                    image.unlink(missing_ok=True)
 
     def _find_in_file(self, event_id: str) -> dict | None:
         if not self.path.exists():

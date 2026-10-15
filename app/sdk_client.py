@@ -8,7 +8,7 @@ import os
 from ctypes import c_int32, c_uint32, c_void_p
 from pathlib import Path
 
-from app.parser import parse_alarm, read_device_ip, read_user_id, summarize_command
+from app.parser import COMM_ALARM_ACS, parse_access, parse_alarm, read_device_ip, read_user_id, summarize_command
 from app.sdk_structs import COMM_ITS_PLATE_RESULT, COMM_UPLOAD_PLATE_RESULT, get_structs
 
 log = logging.getLogger(__name__)
@@ -296,6 +296,16 @@ class SdkClient:
     def _on_message(self, command, alarmer, info, buf_len, _user):
         try:
             command = int(command)
+            if command == COMM_ALARM_ACS:
+                parsed = parse_access(int(info or 0), int(buf_len))
+                if not parsed:
+                    parsed = {"commandOnly": command, "detail": {}}
+                else:
+                    parsed["access"] = True
+                parsed["userId"] = read_user_id(int(alarmer or 0))
+                parsed["deviceIp"] = read_device_ip(int(alarmer or 0))
+                self.on_alarm(parsed)
+                return
             if command not in (COMM_ITS_PLATE_RESULT, COMM_UPLOAD_PLATE_RESULT):
                 self.on_alarm({
                     "commandOnly": command,

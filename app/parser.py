@@ -420,6 +420,152 @@ def _read_text(address: int, size: int) -> str:
     return text
 
 
+COMM_ALARM_ACS = 0x5002
+_ACS_EVENT = 196
+_ACS_CARD = _ACS_EVENT + 4
+_ACS_DOOR = _ACS_EVENT + 44
+_ACS_EMPLOYEE = _ACS_EVENT + 76
+_ACS_PIC_LEN = 300
+
+PASS_METHODS = {
+    0x01: "合法卡通過",
+    0x02: "卡加密碼通過",
+    0x03: "卡加密碼失敗",
+    0x06: "未分配權限",
+    0x09: "無此卡號",
+    0x15: "門鎖打開",
+    0x16: "門鎖關閉",
+    0x17: "開門按鈕",
+    0x19: "正常開門",
+    0x1A: "正常關門",
+    0x1B: "門異常打開",
+    0x1C: "門開超時",
+    0x26: "指紋比對通過",
+    0x27: "指紋比對失敗",
+    0x28: "卡加指紋通過",
+    0x29: "卡加指紋失敗",
+    0x36: "人臉加指紋通過",
+    0x37: "人臉加指紋失敗",
+    0x39: "人臉加密碼通過",
+    0x3A: "人臉加密碼失敗",
+    0x3C: "人臉加卡通過",
+    0x3D: "人臉加卡失敗",
+    0x4B: "人臉認證通過",
+    0x4C: "人臉認證失敗",
+    0x4D: "工號加人臉通過",
+    0x4E: "工號加人臉失敗",
+    0x50: "人臉辨識失敗",
+    0x65: "工號加密碼通過",
+    0x66: "工號加密碼失敗",
+    0x69: "人證比對通過",
+    0x70: "人證比對失敗",
+}
+# 64 位元 pack 1、pack 4，以及 32 位元 pack 1。圖片指標之後才是擴展資料。
+_ACS_PTR_LAYOUTS = (
+    {"pic": 304, "pic_size": 8, "flag": 328, "ext": 320, "ext_size": 8},
+    {"pic": 308, "pic_size": 8, "flag": 336, "ext": 328, "ext_size": 8},
+    {"pic": 304, "pic_size": 4, "flag": 324, "ext": 320, "ext_size": 4},
+)
+
+
+def _u32_at(address: int, offset: int, buf_len: int) -> int:
+    if offset < 0 or offset + 4 > buf_len:
+        return 0
+    try:
+        return int(c_uint32.from_address(address + offset).value)
+    except (ValueError, OSError):
+        return 0
+
+
+def _read_person_text(address: int, size: int) -> str:
+    if size <= 0:
+        return ""
+    try:
+        raw = ctypes.string_at(address, size).split(b"\x00", 1)[0]
+    except (ValueError, OSError):
+        return ""
+    for encoding in ("utf-8", "gbk"):
+        try:
+            text = raw.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+        if text and all(ord(ch) >= 32 for ch in text):
+            return text
+    return ""
+
+
+def _acs_pointer(address: int, offset: int, size: int, buf_len: int) -> int:
+    if offset < 0 or offset + size > buf_len:
+        return 0
+    try:
+        raw = ctypes.string_at(address + offset, size)
+    except (ValueError, OSError):
+        return 0
+    return int.from_bytes(raw, "little")
+
+
+def parse_access(address: int, buf_len: int) -> dict | None:
+    """拆門禁主機事件 0x5002。圖片在回調內複製，不保留指標。"""
+    if not address or buf_len < _ACS_PIC_LEN:
+        return None
+    minor = _u32_at(address, 8, buf_len)
+    year = _u32_at(address, 12, buf_len)
+    month = _u32_at(address, 16, buf_len)
+    day = _u32_at(address, 20, buf_len)
+    hour = _u32_at(address, 24, buf_len)
+    minute = _u32_at(address, 28, buf_len)
+    second = _u32_at(address, 32, buf_len)
+    when = ""
+    if 2000 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+        when = f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}+08:00"
+    card = _read_person_text(address + _ACS_CARD, min(32, max(0, buf_len - _ACS_CARD)))
+    door = _u32_at(address, _ACS_DOOR, buf_len)
+    employee_no = _u32_at(address, _ACS_EMPLOYEE, buf_len)
+    employee = str(employee_no) if employee_no else ""
+    name = ""
+    pic_len = _u32_at(address, _ACS_PIC_LEN, buf_len)
+    image = b""
+    matched = None
+    for layout in _ACS_PTR_LAYOUTS:
+        if not (0 < pic_len <= MAX_IMAGE):
+            break
+        pointer = _acs_pointer(address, layout["pic"], layout["pic_size"], buf_len)
+        blob = _copy_bytes(pointer, pic_len)
+        if blob[:2] != b"\xff\xd8":
+            continue
+        image = blob
+        matched = layout
+        break
+    for layout in (matched,) if matched else _ACS_PTR_LAYOUTS:
+        if layout is None or name:
+            continue
+        if (_u32_at(address, layout["flag"], buf_len) & 0xFF) != 1:
+            continue
+        extend = _acs_pointer(address, layout["ext"], layout["ext_size"], buf_len)
+        if not _plausible_ptr(extend, 40):
+            continue
+        person = _read_person_text(extend + 8, 32)
+        if not person:
+            continue
+        if person.isascii():
+            employee = person
+        else:
+            name = person
+            if not employee:
+                employee = person
+        break
+    return {
+        "command": COMM_ALARM_ACS,
+        "time": when,
+        "method": PASS_METHODS.get(minor, f"門禁事件 0x{minor:04X}"),
+        "cardNo": card,
+        "employeeNo": employee,
+        "name": name,
+        "doorNo": door if door else 0,
+        "imageBytes": image,
+    }
+
+
 def summarize_command(command: int, address: int, buf_len: int) -> dict:
     """在回調裡抄出可顯示的欄位。不保留 SDK 指標。"""
     if not address or buf_len < 8:

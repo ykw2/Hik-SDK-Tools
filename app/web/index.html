@@ -55,7 +55,13 @@
     main { padding: 0 24px 32px; }
     .panel { display: none; }
     .panel.active { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
-    #panel-cameras.active, #panel-events.active, #panel-logs.active { grid-template-columns: 1fr; }
+    #panel-cameras.active, #panel-events.active, #panel-logs.active, #panel-access.active { grid-template-columns: 1fr; }
+    .access-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
+    .access-card { display: grid; grid-template-columns: 112px 1fr; gap: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+    .access-card img, .access-card .no-shot { width: 112px; height: 140px; object-fit: cover; background: #eef1f4; border-radius: 6px; }
+    .access-card .no-shot { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+    .access-card .who { font-weight: 650; margin: 4px 0; }
+    .access-card .meta { color: var(--muted); font-size: 13px; line-height: 1.5; }
     .modal {
       position: fixed;
       inset: 0;
@@ -153,6 +159,7 @@
     <button id="tab-events" type="button">過車結果</button>
     <button id="tab-rules" type="button">發布規則</button>
     <button id="tab-logs" type="button">轉發紀錄</button>
+    <button id="tab-access" type="button">門禁</button>
     <a href="/admin">管理</a>
   </nav>
   <main>
@@ -210,6 +217,13 @@
           <thead><tr><th>名稱</th><th>位址</th><th>狀態</th><th></th></tr></thead>
           <tbody id="rule-list"></tbody>
         </table>
+      </div>
+    </section>
+    <section id="panel-access" class="panel">
+      <div class="card">
+        <strong>人面門禁</strong>
+        <p class="hint">布防之後，人面機每次通過都會出現在這裡。約每 1.5 秒更新。</p>
+        <div id="access-list" class="access-grid"></div>
       </div>
     </section>
     <section id="panel-logs" class="panel">
@@ -284,7 +298,7 @@
       return data;
     }
     function show(name) {
-      for (const id of ["cameras", "events", "rules", "logs"]) {
+      for (const id of ["cameras", "events", "rules", "logs", "access"]) {
         document.getElementById("panel-" + id).classList.toggle("active", id === name);
         document.getElementById("tab-" + id).classList.toggle("active", id === name);
       }
@@ -293,6 +307,7 @@
     document.getElementById("tab-events").onclick = () => show("events");
     document.getElementById("tab-rules").onclick = () => show("rules");
     document.getElementById("tab-logs").onclick = () => show("logs");
+    document.getElementById("tab-access").onclick = () => show("access");
 
     function statusText(cam) {
       if (cam.status === "armed") return "已布防";
@@ -311,7 +326,8 @@
       "0x2800": "車牌",
       "0x3058": "名單同步",
       "0x3059": "名單車輛",
-      "0x4000": "一般報警"
+      "0x4000": "一般報警",
+      "0x5002": "門禁"
     };
     function alarmText(cam) {
       if (!cam.lastCommand) return "—";
@@ -610,13 +626,60 @@
         body.appendChild(extra);
       }
     }
+    function renderAccess(items) {
+      const box = document.getElementById("access-list");
+      box.replaceChildren();
+      if (!items.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = "還沒有門禁事件。";
+        box.appendChild(empty);
+        return;
+      }
+      for (const item of items) {
+        const card = document.createElement("article");
+        card.className = "access-card";
+        if (item.image) {
+          const img = document.createElement("img");
+          img.alt = item.name || item.employeeNo || "門禁擷取";
+          img.src = "/api/shots/" + item.image;
+          card.appendChild(img);
+        } else {
+          const blank = document.createElement("div");
+          blank.className = "no-shot";
+          blank.textContent = "沒有圖像";
+          card.appendChild(blank);
+        }
+        const text = document.createElement("div");
+        const lines = [
+          [item.time || "", "meta"],
+          [item.name || "", "who"],
+          [item.employeeNo ? "工號 " + item.employeeNo : "", ""],
+          [item.cardNo ? "卡號 " + item.cardNo : "", ""],
+          [item.doorNo ? "門 " + item.doorNo : "", ""],
+          [item.method || "", ""],
+          [item.cameraName || item.device || "", "meta"]
+        ];
+        if (!item.name && !item.employeeNo && !item.cardNo) lines.splice(1, 0, ["沒有人員編號", "who"]);
+        for (const [value, className] of lines) {
+          if (!value) continue;
+          const line = document.createElement("div");
+          if (className) line.className = className;
+          line.textContent = value;
+          text.appendChild(line);
+        }
+        card.appendChild(text);
+        box.appendChild(card);
+      }
+    }
     async function refresh() {
-      const [status, cameras, events, rules, logs] = await Promise.all([
+      const [status, cameras, events, rules, logs, access] = await Promise.all([
         api("/api/status"),
         api("/api/cameras"),
         api("/api/events?limit=50"),
         api("/api/rules"),
-        api("/api/forward-logs?limit=50")
+        api("/api/forward-logs?limit=50"),
+        api("/api/access-events?limit=30")
       ]);
       const sdk = document.getElementById("sdk-status");
       sdk.textContent = status.sdkLoaded
@@ -630,6 +693,7 @@
       renderEvents();
       renderRules();
       renderLogs(logs);
+      renderAccess(access);
     }
     function setCameraMode(editingName) {
       const title = document.getElementById("cam-title");

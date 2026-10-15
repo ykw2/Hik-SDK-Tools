@@ -13,6 +13,7 @@ from pathlib import Path
 
 from app.config_store import ConfigStore
 from app.forwarder import Forwarder, parse_headers, parse_template
+from app.parser import COMM_ALARM_ACS
 from app.sdk_client import SdkClient
 from app.sdk_structs import all_layouts
 from app.store import EventStore
@@ -59,6 +60,24 @@ def now_hk() -> datetime:
 
 def now_text() -> str:
     return now_hk().isoformat(timespec="seconds")
+
+
+def _access_detail(event: dict) -> dict:
+    person = " ".join(
+        part
+        for part in (
+            event.get("name") or "",
+            f"工號 {event['employeeNo']}" if event.get("employeeNo") else "",
+            f"卡號 {event['cardNo']}" if event.get("cardNo") else "",
+        )
+        if part
+    )
+    detail = {"時間": event.get("time") or "", "通過方式": event.get("method") or ""}
+    if person:
+        detail["人員"] = person
+    if event.get("doorNo"):
+        detail["門"] = event["doorNo"]
+    return detail
 
 
 def _plate_detail(event: dict) -> dict:
@@ -379,6 +398,15 @@ class Hub:
                 self._rearm(user_id)
 
     def _handle_alarm(self, payload: dict):
+        if payload.get("access"):
+            event = self._store_access(payload)
+            self._note_command(
+                COMM_ALARM_ACS,
+                payload.get("userId"),
+                payload.get("deviceIp"),
+                _access_detail(event),
+            )
+            return
         if payload.get("commandOnly"):
             self._note_command(
                 int(payload["commandOnly"]),
@@ -406,6 +434,35 @@ class Hub:
             session["lastCommand"] = text
             session["lastCommandAt"] = now_text()
             session["lastDetail"] = dict(detail or {})
+
+    def _store_access(self, payload: dict) -> dict:
+        camera = self._camera_for(payload.get("userId"))
+        if not camera and payload.get("deviceIp"):
+            camera = next(
+                (item for item in self.config.cameras() if item.get("host") == payload.get("deviceIp")),
+                None,
+            )
+        event_id = now_hk().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+        image = ""
+        blob = payload.get("imageBytes") or b""
+        if blob[:2] == b"\xff\xd8":
+            image = self.store.save_image(event_id, "face", blob, 0)
+        event = {
+            "id": event_id,
+            "time": payload.get("time") or now_text(),
+            "cameraId": (camera or {}).get("id", ""),
+            "cameraName": (camera or {}).get("name", ""),
+            "device": payload.get("deviceIp") or (camera or {}).get("host") or "",
+            "name": payload.get("name") or "",
+            "employeeNo": payload.get("employeeNo") or "",
+            "cardNo": payload.get("cardNo") or "",
+            "doorNo": payload.get("doorNo") or 0,
+            "method": payload.get("method") or "",
+            "image": image,
+            "receivedAt": now_text(),
+        }
+        self.store.add_access(event)
+        return event
 
     def _store_plate(self, payload: dict) -> dict:
         camera = self._camera_for(payload.get("userId"))

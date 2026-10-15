@@ -176,6 +176,11 @@ def test_rule(rule_id: str):
     return _call(lambda: hub.test_rule(rule_id))
 
 
+@app.get("/api/access-events")
+def access_events(limit: int = 30):
+    return hub.store.access_list(max(1, min(limit, 100)))
+
+
 @app.get("/api/events")
 def events(limit: int = 50):
     return hub.store.list(max(1, min(limit, 200)))

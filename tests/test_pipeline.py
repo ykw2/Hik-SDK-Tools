@@ -16,7 +16,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="hik-data-")
 os.environ["HIKSDK_PATH"] = tempfile.mkdtemp(prefix="hik-sdk-")
 
 from app.forwarder import Forwarder, render_template
-from app.parser import parse_alarm
+from app.parser import parse_access, parse_alarm
 from app.sdk_structs import COMM_ITS_PLATE_RESULT, get_structs
 from fastapi.testclient import TestClient
 from app.main import app
@@ -75,6 +75,94 @@ class ParseTests(unittest.TestCase):
                     self.assertTrue(event["time"].startswith("2026-10-09T01:22:30"))
                     self.assertTrue(event["time"].endswith("+08:00"))
                     del image
+
+
+class AccessParseTests(unittest.TestCase):
+    def test_face_pass_reads_person_time_and_image(self):
+        from ctypes import Structure, c_uint8, c_uint16, c_uint32, c_void_p
+
+        class Event(Structure):
+            _pack_ = 4
+            _fields_ = [
+                ("dwSize", c_uint32),
+                ("byCardNo", c_uint8 * 32),
+                ("byCardType", c_uint8),
+                ("byAllowListNo", c_uint8),
+                ("byReportChannel", c_uint8),
+                ("byCardReaderKind", c_uint8),
+                ("dwCardReaderNo", c_uint32),
+                ("dwDoorNo", c_uint32),
+                ("dwVerifyNo", c_uint32),
+                ("dwAlarmInNo", c_uint32),
+                ("dwAlarmOutNo", c_uint32),
+                ("dwCaseSensorNo", c_uint32),
+                ("dwRs485No", c_uint32),
+                ("dwMultiCardGroupNo", c_uint32),
+                ("wAccessChannel", c_uint16),
+                ("byDeviceNo", c_uint8),
+                ("byDistractControlNo", c_uint8),
+                ("dwEmployeeNo", c_uint32),
+                ("wLocalControllerID", c_uint16),
+                ("byInternetAccess", c_uint8),
+                ("byType", c_uint8),
+                ("byMACAddr", c_uint8 * 6),
+                ("bySwipeCardType", c_uint8),
+                ("byMask", c_uint8),
+                ("dwSerialNo", c_uint32),
+                ("byChannelControllerID", c_uint8),
+                ("byChannelControllerLampID", c_uint8),
+                ("byChannelControllerIRAdaptorID", c_uint8),
+                ("byChannelControllerIREmitterID", c_uint8),
+                ("byRes", c_uint8 * 4),
+            ]
+
+        class Alarm(Structure):
+            _pack_ = 4
+            _fields_ = [
+                ("dwSize", c_uint32),
+                ("dwMajor", c_uint32),
+                ("dwMinor", c_uint32),
+                ("dwYear", c_uint32),
+                ("dwMonth", c_uint32),
+                ("dwDay", c_uint32),
+                ("dwHour", c_uint32),
+                ("dwMinute", c_uint32),
+                ("dwSecond", c_uint32),
+                ("sNetUser", c_uint8 * 16),
+                ("sIpV4", c_uint8 * 16),
+                ("byIPv6", c_uint8 * 128),
+                ("event", Event),
+                ("dwPicDataLen", c_uint32),
+                ("pPicData", c_void_p),
+            ]
+
+        jpeg = b"\xff\xd8\xff\xd9face"
+        image = ctypes.create_string_buffer(jpeg)
+        obj = Alarm()
+        obj.dwSize = ctypes.sizeof(Alarm)
+        obj.dwMajor = 5
+        obj.dwMinor = 0x4B
+        obj.dwYear = 2026
+        obj.dwMonth = 10
+        obj.dwDay = 15
+        obj.dwHour = 21
+        obj.dwMinute = 40
+        obj.dwSecond = 8
+        obj.event.dwDoorNo = 1
+        obj.event.dwEmployeeNo = 88
+        for index, value in enumerate(b"0012345678"):
+            obj.event.byCardNo[index] = value
+        obj.dwPicDataLen = len(jpeg)
+        obj.pPicData = ctypes.addressof(image)
+        parsed = parse_access(ctypes.addressof(obj), ctypes.sizeof(obj))
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["method"], "人臉認證通過")
+        self.assertEqual(parsed["employeeNo"], "88")
+        self.assertEqual(parsed["cardNo"], "0012345678")
+        self.assertEqual(parsed["doorNo"], 1)
+        self.assertEqual(parsed["time"], "2026-10-15T21:40:08+08:00")
+        self.assertEqual(parsed["imageBytes"], jpeg)
+        del image
 
 
 class TemplateTests(unittest.TestCase):
@@ -157,6 +245,7 @@ class ApiTests(unittest.TestCase):
             self.assertIn("發布規則", page.text)
             self.assertIn("清除全部", page.text)
             self.assertIn("API 原始內容", page.text)
+            self.assertIn("人面門禁", page.text)
             self.assertNotIn("卡口車牌", page.text)
             self.assertNotIn("布防收出入口結果", page.text)
             self.assertIn("上線", page.text)
